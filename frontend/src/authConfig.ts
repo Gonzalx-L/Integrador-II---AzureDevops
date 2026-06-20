@@ -15,4 +15,5 @@ export const loginRequest: PopupRequest = {
   scopes: ["User.Read"],
 };
 
-export const API_BASE_URL = "https://func-docucolab-dev.azurewebsites.net/api";
+export const API_BASE_URL =
+  import.meta.env.VITE_API_BASE_URL ?? "https://func-docucolab-dev.azurewebsites.net/api";

@@ -19,5 +19,13 @@
     "durableTask": {
       "hubName": "DocuColabTaskHub"
     }
+  },
+  "cors": {
+    "allowedOrigins": [
+      "http://localhost:5173",
+      "http://localhost:4173",
+      "https://func-docucolab-dev.azurewebsites.net"
+    ],
+    "supportCredentials": false
   }
 }

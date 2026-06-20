@@ -37,10 +37,28 @@ export async function getDocuments(
       : COUNTRIES;
 
     for (const country of countriesToList) {
-      // Archivos en DESBLOQUEADOS (procesados limpios)
       const containerClientT = clientTransferencia.getContainerClient(containerTransferencia);
-      const prefixDesbloqueados = `MENSUALES/${country.storagePath}/DESBLOQUEADOS/`;
 
+      // 1. Archivos recién subidos en la raíz (pendientes de escaneo)
+      const prefixRaiz = `MENSUALES/${country.storagePath}/`;
+      for await (const blob of containerClientT.listBlobsFlat({ prefix: prefixRaiz })) {
+        if (!blob.name.endsWith(".zip")) continue;
+        // Solo los que están en la raíz (no en subcarpetas)
+        const relativePath = blob.name.replace(prefixRaiz, "");
+        if (relativePath.includes("/")) continue; // está en subcarpeta, se procesa abajo
+        documents.push({
+          name: blob.name.split("/").pop(),
+          path: blob.name,
+          country: country.code,
+          countryName: country.name,
+          status: "EN_PROCESO",
+          size: blob.properties.contentLength,
+          lastModified: blob.properties.lastModified
+        });
+      }
+
+      // 2. Archivos en DESBLOQUEADOS (limpios procesados)
+      const prefixDesbloqueados = `MENSUALES/${country.storagePath}/DESBLOQUEADOS/`;
       for await (const blob of containerClientT.listBlobsFlat({ prefix: prefixDesbloqueados })) {
         if (blob.name.endsWith(".zip")) {
           documents.push({
@@ -55,7 +73,7 @@ export async function getDocuments(
         }
       }
 
-      // Archivos en ERROR
+      // 3. Archivos en ERROR
       const prefixError = `MENSUALES/${country.storagePath}/ERROR/`;
       for await (const blob of containerClientT.listBlobsFlat({ prefix: prefixError })) {
         if (blob.name.endsWith(".zip")) {
@@ -71,10 +89,9 @@ export async function getDocuments(
         }
       }
 
-      // Archivos en documentos finales (procesados completos)
+      // 4. Archivos en storage final de documentos (procesados completos)
       const containerClientD = clientDocumentos.getContainerClient(containerDocumentos);
       const prefixDocumentos = `${country.storagePath}/MENSUALES/`;
-
       for await (const blob of containerClientD.listBlobsFlat({ prefix: prefixDocumentos })) {
         if (blob.name.endsWith(".zip")) {
           documents.push({

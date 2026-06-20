@@ -17,12 +17,16 @@ const COLORS = ["#1e3a5f","#e91e63","#ff9800","#4caf50","#9c27b0","#00bcd4"];
 
 const PILL: Record<string, string> = {
   LIMPIO: "pill-limpio", PROCESADO: "pill-procesado", ERROR: "pill-error",
+  EN_PROCESO: "pill-revision",
   "En revisión": "pill-revision", Aprobado: "pill-aprobado", Completado: "pill-completado",
 };
 
 function StatusPill({ s }: { s: string }) {
-  const label = s === "LIMPIO" ? "● Limpio" : s === "PROCESADO" ? "● Completado"
-    : s === "ERROR" ? "● Error" : `● ${s}`;
+  const label = s === "LIMPIO" ? "● Limpio"
+    : s === "PROCESADO" ? "● Completado"
+    : s === "ERROR" ? "● Error"
+    : s === "EN_PROCESO" ? "⏳ En proceso"
+    : `● ${s}`;
   return <span className={`status-pill ${PILL[s] || "pill-limpio"}`}>{label}</span>;
 }
 

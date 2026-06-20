@@ -1,0 +1,31 @@
+{
+  "name": "bluetab-docucolab-backend",
+  "version": "1.0.0",
+  "description": "DocuColab - Pipeline automatizado de procesamiento de documentos ZIP - Bluetab Solutions Perú",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc",
+    "watch": "tsc --watch",
+    "prestart": "npm run build",
+    "start": "func start",
+    "lint": "eslint src/**/*.ts"
+  },
+  "dependencies": {
+    "@azure/functions": "^4.0.0",
+    "@azure/identity": "^4.0.0",
+    "@azure/keyvault-secrets": "^4.8.0",
+    "@azure/storage-blob": "^12.17.0",
+    "@azure/storage-queue": "^12.17.0",
+    "adm-zip": "^0.5.10",
+    "durable-functions": "^3.3.0",
+    "luxon": "^3.4.4",
+    "uuid": "^9.0.0"
+  },
+  "devDependencies": {
+    "@types/adm-zip": "^0.5.5",
+    "@types/luxon": "^3.3.7",
+    "@types/node": "^18.19.0",
+    "@types/uuid": "^9.0.7",
+    "typescript": "^5.3.2"
+  }
+}

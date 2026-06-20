@@ -1,0 +1,25 @@
+# Node
+node_modules/
+npm-debug.log*
+
+# Build outputs
+frontend/dist/
+backend/dist/
+*.zip
+
+# Azure local settings (contienen keys — NO subir)
+backend/local.settings.json
+
+# Azurite data
+azurite-data/
+
+# Environment
+.env
+.env.local
+
+# OS
+.DS_Store
+Thumbs.db
+
+# VS Code
+.vscode/

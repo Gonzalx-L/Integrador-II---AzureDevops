@@ -16,16 +16,6 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: '22'
-          cache: 'npm'
-          cache-dependency-path: frontend/package-lock.json
-
-      - name: Instalar dependencias
-        run: npm ci
-        working-directory: frontend
-
-      - name: Build Vite
-        run: npm run build
-        working-directory: frontend
 
       - name: Deploy a Azure Static Web Apps
         uses: Azure/static-web-apps-deploy@v1
@@ -35,7 +25,7 @@ jobs:
           action: "upload"
           app_location: "frontend"
           output_location: "dist"
-          skip_app_build: true
+          app_build_command: "npm install && npm run build"
 
   # ── BACKEND → Azure Functions ─────────────────────────────
   deploy_backend:
@@ -48,8 +38,6 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: '22'
-          cache: 'npm'
-          cache-dependency-path: backend/package-lock.json
 
       - name: Instalar dependencias
         run: npm ci
@@ -60,7 +48,7 @@ jobs:
         working-directory: backend
 
       - name: Login a Azure
-        uses: azure/login@v1
+        uses: azure/login@v2
         with:
           creds: ${{ secrets.AZURE_CREDENTIALS }}
 

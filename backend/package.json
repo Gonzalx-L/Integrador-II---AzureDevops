@@ -17,9 +17,9 @@
     "@azure/storage-blob": "^12.17.0",
     "@azure/storage-queue": "^12.17.0",
     "adm-zip": "^0.5.10",
-    "durable-functions": "^3.3.0",
+    "durable-functions": "^3.4.0",
     "luxon": "^3.4.4",
-    "uuid": "^9.0.0"
+    "uuid": "^14.0.1"
   },
   "devDependencies": {
     "@types/adm-zip": "^0.5.5",

@@ -252,7 +252,6 @@
   border: 2px dashed #bfdbfe; border-radius: 12px;
   padding: 52px 24px; text-align: center;
   background: #f0f9ff; cursor: pointer; transition: border 0.2s, background 0.2s;
-  margin-bottom: 24px;
 }
 .dropzone:hover { border-color: #1565c0; background: #e0f2fe; }
 .dropzone-icon { font-size: 40px; margin-bottom: 12px; }
@@ -284,10 +283,22 @@ tbody tr:hover { background: #f8fafc; }
 }
 .pill-revision   { background: #fef9c3; color: #b45309; }
 .pill-completado { background: #f3e8ff; color: #7c3aed; }
-.pill-limpio     { background: #e0f2fe; color: #0369a1; }
+.pill-limpio     { background: #dcfce7; color: #15803d; }
 .pill-aprobado   { background: #dcfce7; color: #15803d; }
 .pill-error      { background: #fee2e2; color: #b91c1c; }
 .pill-procesado  { background: #dbeafe; color: #1d4ed8; }
+
+/* ── Azure Defender for Storage — estados reales ── */
+/* "No threats found" — verde: escaneo limpio                 */
+.pill-limpio     { background: #dcfce7; color: #15803d; }
+/* "Malicious" — rojo: amenaza confirmada                     */
+.pill-error      { background: #fee2e2; color: #b91c1c; }
+/* "Suspicious" — naranja: comportamiento sospechoso          */
+.pill-suspicious { background: #fff7ed; color: #c2410c; }
+/* "Scanning" — azul: Defender analizando en este momento     */
+.pill-revision   { background: #eff6ff; color: #1d4ed8; }
+/* "Unscanned" — gris: blob recién subido, pendiente Defender */
+.pill-unscanned  { background: #f1f5f9; color: #64748b; }
 
 /* ── DOCUMENTOS PAGE ── */
 .docs-filters { display: flex; align-items: center; gap: 8px; margin-bottom: 16px; flex-wrap: wrap; }

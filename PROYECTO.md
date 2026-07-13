@@ -423,3 +423,82 @@ Generar el código completo del proyecto:
 4. Frontend: login.html + dashboard.html conectados al backend
 5. Configuración de Azurite para pruebas locales
 6. Pipeline de Azure DevOps (azure-pipelines.yml)
+
+---
+
+## 14. Lineamiento de Implementación — Historial de Documentos y Carga de Archivos
+
+> Decisiones tomadas y reglas fijas que NO deben cambiarse sin consenso del equipo.
+
+### 14.1 Cuenta de Almacenamiento y Ruta de Lectura
+
+El dashboard debe leer los documentos **únicamente** desde:
+
+```
+Storage Account : sttransferenciaarchivos
+Contenedor      : transferencia-archivos
+Ruta fija       : MENSUALES/BLUETAB_PERU/
+```
+
+Solo se listan archivos `.zip` dentro de esa ruta. No se listan subcarpetas ni otros tipos de archivo.
+
+### 14.2 Estados de Azure Defender for Storage
+
+Los estados que se muestran en la tabla de documentos son **exactamente los que Azure Defender escribe** en los tags del blob bajo la clave `"Malware Scanning Result"`. No se inventan estados propios.
+
+| Estado Defender | Significado | Color en UI |
+|---|---|---|
+| `Unscanned` | Blob recién subido, Defender aún no lo procesó | Gris |
+| `Scanning` | Defender está analizando el archivo en este momento | Azul |
+| `No threats found` | Escaneo completado, archivo limpio | Verde |
+| `Suspicious` | Comportamiento sospechoso, requiere revisión manual | Naranja |
+| `Malicious` | Amenaza confirmada detectada por Defender | Rojo |
+
+Si el blob no tiene el tag (Defender no habilitado o muy reciente), se muestra `Unscanned` por defecto.
+
+### 14.3 Subida de Archivos
+
+- Solo se aceptan archivos con extensión `.zip`. Cualquier otro tipo debe ser rechazado tanto en frontend (validación en dropzone y `<input accept=".zip">`) como en backend (validación en `UploadZip`).
+- El archivo se sube a la ruta: `MENSUALES/BLUETAB_PERU/{uuid}_{nombre_original}.zip`
+- El contenedor destino es `transferencia-archivos` en `sttransferenciaarchivos`.
+
+### 14.4 Variables de Entorno Definitivas (local.settings.json)
+
+```json
+{
+  "IsEncrypted": false,
+  "Values": {
+    "AzureWebJobsStorage": "UseDevelopmentStorage=true",
+    "FUNCTIONS_WORKER_RUNTIME": "node",
+    "CONTAINER_TRANSFERENCIA": "transferencia-archivos",
+    "STORAGE_TRANSFERENCIA_CONNECTION": "<connection-string de sttransferenciaarchivos>"
+  },
+  "Host": {
+    "LocalHttpPort": 7071,
+    "CORS": "http://localhost:5173",
+    "CORSCredentials": false
+  }
+}
+```
+
+> La connection string real de `sttransferenciaarchivos` se obtiene con:
+> ```bash
+> az storage account show-connection-string --name sttransferenciaarchivos --resource-group rg-bluetab-docucolab-dev --query connectionString -o tsv
+> ```
+
+### 14.5 Lógica del Endpoint GET /api/documents
+
+1. Conectar a `sttransferenciaarchivos` usando `STORAGE_TRANSFERENCIA_CONNECTION`
+2. Listar blobs en `transferencia-archivos` con prefix `MENSUALES/BLUETAB_PERU/`
+3. Filtrar solo archivos `.zip` (ignorar subcarpetas y archivos `.error.json`)
+4. Leer el tag `"Malware Scanning Result"` de cada blob → ese es el estado
+5. Si el tag no existe → estado = `"Unscanned"`
+6. Retornar lista ordenada por `lastModified` descendente
+
+### 14.6 Reglas de Frontend
+
+- El dropzone y el `<input>` de archivo solo aceptan `.zip` (`accept=".zip"`)
+- Si el usuario intenta subir otro tipo, mostrar error: `"Solo se permiten archivos .ZIP"`
+- La tabla de documentos usa `StatusPill` con los 5 estados de Defender (ver 14.2)
+- Los filtros de la tabla deben coincidir exactamente con los nombres de estado de Defender
+- El polling de documentos se hace cada 15 segundos (`setInterval(fetchDocs, 15000)`)

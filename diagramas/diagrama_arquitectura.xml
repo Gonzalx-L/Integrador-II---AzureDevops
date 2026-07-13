@@ -1,0 +1,171 @@
+<mxfile host="app.diagrams.net">
+  <diagram name="Arquitectura DocuColab" id="0">
+    <mxGraphModel dx="859" dy="461" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1654" pageHeight="1169" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+        <mxCell id="e14" edge="1" parent="1" source="fn_defender" style="edgeStyle=orthogonalEdgeStyle;" target="defender">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e11" edge="1" parent="1" source="fn_defender" style="edgeStyle=orthogonalEdgeStyle;" target="queues">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e15" edge="1" parent="1" source="blob1" style="edgeStyle=orthogonalEdgeStyle;" target="eventgrid">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e1" edge="1" parent="1" source="colab" style="edgeStyle=orthogonalEdgeStyle;" target="frontend">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e2" edge="1" parent="1" source="admin" style="edgeStyle=orthogonalEdgeStyle;" target="frontend">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="title" parent="1" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=18;fontStyle=1;fontColor=#1e3a5f;" value="DocuColab — Arquitectura General del Sistema" vertex="1">
+          <mxGeometry height="40" width="760" x="400" y="20" as="geometry" />
+        </mxCell>
+        <mxCell id="layer1" parent="1" style="text;html=1;strokeColor=none;fillColor=#dae8fc;align=center;verticalAlign=middle;whiteSpace=wrap;rounded=1;fontSize=11;fontStyle=1;fontColor=#1e3a5f;" value="CAPA DE PRESENTACIÓN" vertex="1">
+          <mxGeometry height="40" width="200" x="70" y="80" as="geometry" />
+        </mxCell>
+        <mxCell id="colab" parent="1" style="shape=mxgraph.azure2.user;fillColor=#0078D4;strokeColor=#005A9E;fontColor=#ffffff;fontStyle=1;fontSize=10;" value="👤 Colaborador&#xa;(Sede Perú / España / Arg / NZ)" vertex="1">
+          <mxGeometry height="80" width="160" x="20" y="150" as="geometry" />
+        </mxCell>
+        <mxCell id="colab_lbl" parent="1" style="text;html=1;strokeColor=none;fillColor=none;align=center;fontSize=10;" value="Colaborador" vertex="1">
+          <mxGeometry height="20" width="100" x="80" y="245" as="geometry" />
+        </mxCell>
+        <mxCell id="admin" parent="1" style="shape=mxgraph.azure2.user;fillColor=#1e3a5f;strokeColor=#0d2137;fontColor=#ffffff;fontStyle=1;fontSize=10;" value="👤 Administrador&#xa;(Bluetab)" vertex="1">
+          <mxGeometry height="80" width="110" x="200" y="150" as="geometry" />
+        </mxCell>
+        <mxCell id="admin_lbl" parent="1" style="text;html=1;strokeColor=none;fillColor=none;align=center;fontSize=10;" value="Administrador" vertex="1">
+          <mxGeometry height="20" width="100" x="170" y="245" as="geometry" />
+        </mxCell>
+        <mxCell id="azuread" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=10;fontStyle=1;" value="🔐 Azure Active Directory&#xa;(MSAL — loginRedirect)" vertex="1">
+          <mxGeometry height="50" width="200" x="60" y="290" as="geometry" />
+        </mxCell>
+        <mxCell id="UBYpReQ5U3wBXpC0Qww--5" edge="1" parent="1" source="frontend" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;entryX=0;entryY=0.5;entryDx=0;entryDy=0;dashed=1;" target="fn_error">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="340" y="465" />
+              <mxPoint x="340" y="465" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="frontend" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=10;fontStyle=1;" value="⚛️ Frontend React&#xa;Vite + TypeScript + MSAL&#xa;Azure Static Web Apps&#xa;swa-docucolab-dev" vertex="1">
+          <mxGeometry height="70" width="200" x="60" y="410" as="geometry" />
+        </mxCell>
+        <mxCell id="e3" edge="1" parent="1" source="frontend" style="edgeStyle=orthogonalEdgeStyle;dashed=1;" target="azuread">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="layer2" parent="1" style="text;html=1;strokeColor=none;fillColor=#dae8fc;align=center;verticalAlign=middle;whiteSpace=wrap;rounded=1;fontSize=11;fontStyle=1;fontColor=#1e3a5f;" value="CAPA DE LÓGICA DE NEGOCIO — Azure Functions v4" vertex="1">
+          <mxGeometry height="40" width="380" x="340" y="80" as="geometry" />
+        </mxCell>
+        <mxCell id="funcapp_lbl" parent="1" style="text;html=1;strokeColor=none;fillColor=none;align=center;fontSize=9;fontStyle=3;fontColor=#1e3a5f;" value="func-docucolab-dev" vertex="1">
+          <mxGeometry height="20" width="200" x="430" y="135" as="geometry" />
+        </mxCell>
+        <mxCell id="fn_upload" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#8b5cf622;strokeColor=#8b5cf6;fontSize=9;" value="⚡ UploadZip&#xa;HTTP POST /api/upload" vertex="1">
+          <mxGeometry height="50" width="160" x="355" y="160" as="geometry" />
+        </mxCell>
+        <mxCell id="fn_getdocs" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#8b5cf622;strokeColor=#8b5cf6;fontSize=9;" value="⚡ GetDocuments&#xa;HTTP GET /api/documents" vertex="1">
+          <mxGeometry height="50" width="160" x="545" y="160" as="geometry" />
+        </mxCell>
+        <mxCell id="fn_status" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#8b5cf622;strokeColor=#8b5cf6;fontSize=9;" value="⚡ GetPipelineStatus&#xa;HTTP GET /api/status" vertex="1">
+          <mxGeometry height="50" width="160" x="545" y="220" as="geometry" />
+        </mxCell>
+        <mxCell id="fn_timer" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f59e0b22;strokeColor=#f59e0b;fontSize=9;" value="⏱️ CompanyJobScheduler&#xa;Timer: cada 5 min&#xa;Luxon timezone check" vertex="1">
+          <mxGeometry height="60" width="160" x="355" y="220" as="geometry" />
+        </mxCell>
+        <mxCell id="fn_orch" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#8b5cf622;strokeColor=#8b5cf6;fontSize=9;" value="⚡ DurableOrchestrator&#xa;Coordina flujo por país" vertex="1">
+          <mxGeometry height="50" width="160" x="355" y="295" as="geometry" />
+        </mxCell>
+        <mxCell id="fn_activity" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#8b5cf622;strokeColor=#8b5cf6;fontSize=9;" value="⚡ DurableExecutions&#xa;Activity: registra archivos" vertex="1">
+          <mxGeometry height="50" width="160" x="545" y="295" as="geometry" />
+        </mxCell>
+        <mxCell id="fn_defender" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#6366f122;strokeColor=#6366f1;fontSize=9;" value="⚡ OnDefenderScanResult&#xa;Queue: queue-zip-scan&#xa;Clasifica CLEAN/PROT/ERR" vertex="1">
+          <mxGeometry height="60" width="160" x="355" y="360" as="geometry" />
+        </mxCell>
+        <mxCell id="fn_clean" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#22c55e22;strokeColor=#22c55e;fontSize=9;" value="⚡ OnCleanZipFromQueue&#xa;Queue: queue-zip-limpios" vertex="1">
+          <mxGeometry height="50" width="160" x="355" y="490" as="geometry" />
+        </mxCell>
+        <mxCell id="UBYpReQ5U3wBXpC0Qww--6" edge="1" parent="1" source="fn_prot" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;exitX=0.5;exitY=0;exitDx=0;exitDy=0;">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="625.2857142857144" y="350" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="fn_prot" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f59e0b22;strokeColor=#f59e0b;fontSize=9;" value="⚡ OnProtectedZipFromQueue&#xa;Queue: queue-zip-protegidos" vertex="1">
+          <mxGeometry height="50" width="160" x="545" y="360" as="geometry" />
+        </mxCell>
+        <mxCell id="UBYpReQ5U3wBXpC0Qww--4" edge="1" parent="1" source="fn_error" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;" target="fn_prot" value="">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="fn_error" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ef444422;strokeColor=#ef4444;fontSize=9;" value="⚡ OnErrorZipFromQueue&#xa;Queue: queue-zip-error" vertex="1">
+          <mxGeometry height="50" width="160" x="545" y="440" as="geometry" />
+        </mxCell>
+        <mxCell id="e4" edge="1" parent="1" source="frontend" style="edgeStyle=orthogonalEdgeStyle;" target="fn_upload">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="435" y="420" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e7" edge="1" parent="1" source="fn_timer" style="edgeStyle=orthogonalEdgeStyle;" target="fn_orch">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e8" edge="1" parent="1" source="fn_orch" style="edgeStyle=orthogonalEdgeStyle;" target="fn_activity">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="layer3" parent="1" style="text;html=1;strokeColor=none;fillColor=#dae8fc;align=center;verticalAlign=middle;whiteSpace=wrap;rounded=1;fontSize=11;fontStyle=1;fontColor=#1e3a5f;" value="CAPA DE SERVICIOS AZURE" vertex="1">
+          <mxGeometry height="40" width="300" x="800" y="80" as="geometry" />
+        </mxCell>
+        <mxCell id="blob1" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#0ea5e922;strokeColor=#0ea5e9;fontSize=9;align=left;verticalAlign=top;" value="🗄️ Azure Blob Storage&#xa;sttransferenciaarchivos&#xa;&#xa;• MENSUALES/{PAÍS}/&#xa;• MENSUALES/{PAÍS}/DESBLOQUEADOS/&#xa;• MENSUALES/{PAÍS}/ERROR/" vertex="1">
+          <mxGeometry height="100" width="220" x="840" y="130" as="geometry" />
+        </mxCell>
+        <mxCell id="blob2" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#0ea5e922;strokeColor=#0ea5e9;fontSize=9;align=left;verticalAlign=top;" value="🗄️ Azure Blob Storage&#xa;stdocumentoscolab&#xa;&#xa;• documentos/{PAÍS}/MENSUALES/&#xa;  (almacenamiento definitivo)" vertex="1">
+          <mxGeometry height="80" width="220" x="840" y="245" as="geometry" />
+        </mxCell>
+        <mxCell id="queues" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#6366f122;strokeColor=#6366f1;fontSize=9;align=left;verticalAlign=top;" value="📬 Azure Queue Storage&#xa;&#xa;• queue-zip-scan&#xa;• queue-zip-limpios&#xa;• queue-zip-protegidos&#xa;• queue-zip-error" vertex="1">
+          <mxGeometry height="100" width="220" x="840" y="340" as="geometry" />
+        </mxCell>
+        <mxCell id="kv" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f59e0b22;strokeColor=#f59e0b;fontSize=9;align=left;verticalAlign=top;" value="🔐 Azure Key Vault&#xa;kv-docucolab-dev&#xa;&#xa;Secretos: zip-password-{PAÍS}&#xa;Acceso: Managed Identity" vertex="1">
+          <mxGeometry height="80" width="220" x="840" y="460" as="geometry" />
+        </mxCell>
+        <mxCell id="UBYpReQ5U3wBXpC0Qww--2" edge="1" parent="1" source="defender" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;" target="eventgrid" value="">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="defender" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#22c55e22;strokeColor=#22c55e;fontSize=9;align=left;verticalAlign=top;" value="🛡️ Azure Defender for Storage&#xa;(mock en dev: defenderMock.ts)&#xa;&#xa;Detecta: malware, ransomware,&#xa;archivos peligrosos, ZIPs corruptos" vertex="1">
+          <mxGeometry height="80" width="220" x="840" y="557.5" as="geometry" />
+        </mxCell>
+        <mxCell id="eventgrid" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ec489922;strokeColor=#ec4899;fontSize=9;align=left;verticalAlign=top;" value="⚡ Azure Event Grid&#xa;evgt-transferenciaarch-dev&#xa;&#xa;Evento: BlobCreated&#xa;→ dispara escaneo Defender" vertex="1">
+          <mxGeometry height="70" width="220" x="840" y="670" as="geometry" />
+        </mxCell>
+        <mxCell id="e9" edge="1" parent="1" source="fn_upload" style="edgeStyle=orthogonalEdgeStyle;" target="blob1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e10" edge="1" parent="1" source="fn_upload" style="edgeStyle=orthogonalEdgeStyle;" target="queues">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e12" edge="1" parent="1" source="fn_clean" style="edgeStyle=orthogonalEdgeStyle;" target="blob2">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e13" edge="1" parent="1" source="fn_prot" style="edgeStyle=orthogonalEdgeStyle;" target="kv">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="cicd" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e8d5f5;strokeColor=#9c27b0;fontSize=9;" value="🔄 CI/CD&#xa;Azure Pipelines + GitHub Actions&#xa;Deploy automático desde main" vertex="1">
+          <mxGeometry height="60" width="220" x="840" y="760" as="geometry" />
+        </mxCell>
+        <mxCell id="legend_title" parent="1" style="text;html=1;strokeColor=none;fillColor=none;align=left;fontSize=10;fontStyle=1;" value="Leyenda" vertex="1">
+          <mxGeometry height="20" width="100" x="40" y="530" as="geometry" />
+        </mxCell>
+        <mxCell id="leg1" parent="1" style="rounded=1;fillColor=#8b5cf622;strokeColor=#8b5cf6;fontSize=9;" value="⚡ Azure Function" vertex="1">
+          <mxGeometry height="25" width="120" x="40" y="555" as="geometry" />
+        </mxCell>
+        <mxCell id="leg2" parent="1" style="rounded=1;fillColor=#0ea5e922;strokeColor=#0ea5e9;fontSize=9;" value="🗄️ Azure Storage" vertex="1">
+          <mxGeometry height="25" width="120" x="40" y="585" as="geometry" />
+        </mxCell>
+        <mxCell id="leg3" parent="1" style="rounded=1;fillColor=#6366f122;strokeColor=#6366f1;fontSize=9;" value="📬 Azure Queue" vertex="1">
+          <mxGeometry height="25" width="120" x="40" y="615" as="geometry" />
+        </mxCell>
+        <mxCell id="leg4" parent="1" style="rounded=1;fillColor=#f59e0b22;strokeColor=#f59e0b;fontSize=9;" value="🔐 Azure Key Vault" vertex="1">
+          <mxGeometry height="25" width="120" x="40" y="645" as="geometry" />
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

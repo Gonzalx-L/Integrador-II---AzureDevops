@@ -10,24 +10,38 @@ type Page = "inicio" | "subir" | "documentos" | "reportes";
 
 interface DocItem {
   name: string; path: string; country: string; countryName: string;
-  status: string; size: number; lastModified: string;
+  // Estados reales de Azure Defender for Storage (malware scanning)
+  status: "No threats found" | "Malicious" | "Suspicious" | "Scanning" | "Unscanned" | string;
+  size: string | number; lastModified: string;
 }
 
 const COLORS = ["#1e3a5f","#e91e63","#ff9800","#4caf50","#9c27b0","#00bcd4"];
 
+/**
+ * Mapa de clases CSS para los estados reales de Azure Defender for Storage.
+ * Referencia: https://learn.microsoft.com/azure/storage/common/azure-defender-storage-configure
+ * Backend maneja inglés (valores reales de Defender), frontend muestra español.
+ */
 const PILL: Record<string, string> = {
-  LIMPIO: "pill-limpio", PROCESADO: "pill-procesado", ERROR: "pill-error",
-  EN_PROCESO: "pill-revision",
-  "En revisión": "pill-revision", Aprobado: "pill-aprobado", Completado: "pill-completado",
+  "No threats found": "pill-limpio",
+  "Malicious":        "pill-error",
+  "Suspicious":       "pill-suspicious",
+  "Scanning":         "pill-revision",
+  "Unscanned":        "pill-unscanned",
+};
+
+// Traducción visual — solo para mostrar en UI, el valor interno sigue en inglés
+const DEFENDER_LABEL: Record<string, string> = {
+  "No threats found": "✅ Sin amenazas",
+  "Malicious":        "🚫 Malicioso",
+  "Suspicious":       "⚠️ Sospechoso",
+  "Scanning":         "🔍 Escaneando",
+  "Unscanned":        "⏳ Sin escanear",
 };
 
 function StatusPill({ s }: { s: string }) {
-  const label = s === "LIMPIO" ? "● Limpio"
-    : s === "PROCESADO" ? "● Completado"
-    : s === "ERROR" ? "● Error"
-    : s === "EN_PROCESO" ? "⏳ En proceso"
-    : `● ${s}`;
-  return <span className={`status-pill ${PILL[s] || "pill-limpio"}`}>{label}</span>;
+  const label = DEFENDER_LABEL[s] ?? `● ${s}`;
+  return <span className={`status-pill ${PILL[s] || "pill-unscanned"}`}>{label}</span>;
 }
 
 // ── SIDEBAR ──────────────────────────────────────────────
@@ -92,16 +106,15 @@ function Topbar({ section, user }: any) {
 function InicioPage({ docs, onUpload, userName }: { docs: DocItem[]; onUpload: () => void; userName: string }) {
   const nombre     = userName.split(" ")[0];
   const total      = docs.length || 24;
-  const procesados = docs.filter(d=>d.status==="PROCESADO").length || 18;
-  const errores    = docs.filter(d=>d.status==="ERROR").length || 3;
-  const limpios    = docs.filter(d=>d.status==="LIMPIO").length || 2;
-  const scanning   = Math.max(0, docs.length - docs.filter(d=>["LIMPIO","PROCESADO","ERROR"].includes(d.status)).length);
+  const limpios    = docs.filter(d => d.status === "No threats found").length || 18;
+  const maliciosos = docs.filter(d => d.status === "Malicious").length || 3;
+  const scanning   = docs.filter(d => d.status === "Scanning" || d.status === "Unscanned").length || 2;
 
   const stats = [
     { icon:"📄", color:"blue",   num:total,      label:"Documentos subidos",  sub:"Total registrado" },
-    { icon:"✅", color:"green",  num:procesados,  label:"Archivos procesados", sub:"Flujo completado" },
-    { icon:"🔒", color:"red",    num:errores,     label:"Amenazas / Errores",  sub:"Detectados por Defender" },
-    { icon:"📂", color:"orange", num:limpios,     label:"Archivos limpios",    sub:"Sin amenazas" },
+    { icon:"✅", color:"green",  num:limpios,     label:"No threats found",    sub:"Escaneo limpio" },
+    { icon:"🔒", color:"red",    num:maliciosos,  label:"Malicious / Error",   sub:"Detectados por Defender" },
+    { icon:"🔍", color:"orange", num:scanning,    label:"Scanning / Unscanned",sub:"Pendiente de análisis" },
   ];
 
   return (
@@ -126,8 +139,8 @@ function InicioPage({ docs, onUpload, userName }: { docs: DocItem[]; onUpload: (
 
       <PipelineDiagram
         limpios={limpios}
-        protegidos={procesados}
-        errores={errores}
+        protegidos={docs.filter(d => d.status === "Suspicious").length}
+        errores={maliciosos}
         scanning={scanning > 0}
       />
 
@@ -144,7 +157,7 @@ function InicioPage({ docs, onUpload, userName }: { docs: DocItem[]; onUpload: (
 }
 
 // ── SUBIR ARCHIVO ─────────────────────────────────────────
-function SubirPage({ docs, countries, onUploaded, userName, isAdmin }: any) {
+function SubirPage({ docs, countries, onUploaded, userName, isAdmin, userEmail }: any) {
   const [file, setFile]       = useState<File|null>(null);
   const [country, setCountry] = useState("");
   const [msg, setMsg]         = useState("");
@@ -156,7 +169,10 @@ function SubirPage({ docs, countries, onUploaded, userName, isAdmin }: any) {
     setUploading(true); setMsg("");
     try {
       const form = new FormData();
-      form.append("file", file); form.append("countryCode", country);
+      form.append("file", file);
+      form.append("countryCode", country);
+      // Enviar el email del usuario para guardarlo en el metadata del blob
+      if (userEmail) form.append("uploader", userEmail);
       await axios.post(`${API_BASE_URL}/upload`, form);
       setMsg("✅ Archivo subido exitosamente. El escaneo iniciará en breve.");
       setIsError(false); setFile(null); setCountry("");
@@ -166,93 +182,112 @@ function SubirPage({ docs, countries, onUploaded, userName, isAdmin }: any) {
     } finally { setUploading(false); }
   };
 
-  const recent = docs.length > 0 ? docs.slice(0,3) : [
-    { name:"informe_abril_2025.zip",   date:"02 Abr 2025", size:"2.4 MB", status:"En revisión" },
-    { name:"informe_marzo_2025.zip",   date:"01 Mar 2025", size:"1.8 MB", status:"Completado" },
-    { name:"informe_febrero_2025.zip", date:"03 Feb 2025", size:"2.1 MB", status:"Completado" },
+  const recent = docs.length > 0 ? docs.slice(0,5) : [
+    { name:"informe_abril_2025.zip",   date:"02 Abr 2025", size:"2.4 MB", status:"Unscanned" },
+    { name:"informe_marzo_2025.zip",   date:"01 Mar 2025", size:"1.8 MB", status:"No threats found" },
+    { name:"informe_febrero_2025.zip", date:"03 Feb 2025", size:"2.1 MB", status:"No threats found" },
   ];
 
   const nombre = (userName || "Usuario").split(" ")[0];
 
   return (
-    <div style={{maxWidth:620}}>
+    <div style={{width:"100%"}}>
       <div className="page-header">
         <h1>Hola, {nombre}. Sube tu archivo mensual.</h1>
         <p>Solo se aceptan archivos .ZIP cifrados · Plazo: 30 de mayo</p>
       </div>
 
-      {/* Selector de país */}
-      <div className="card" style={{padding:"20px 24px",marginBottom:16}}>
-        <label style={{fontSize:13,fontWeight:600,color:"#374151",display:"block",marginBottom:8}}>País / Sede</label>
-        <select value={country} onChange={e=>setCountry(e.target.value)}
-          style={{width:"100%",padding:"10px 12px",border:"1.5px solid #e2e8f0",borderRadius:8,fontSize:14,outline:"none"}}>
-          <option value="">Seleccionar país...</option>
-          {countries.map((c:any)=><option key={c.code} value={c.code}>{c.name}</option>)}
-        </select>
-      </div>
+      {/* Layout dos columnas */}
+      <div style={{display:"grid", gridTemplateColumns:"1fr 1fr", gap:24, alignItems:"start"}}>
 
-      {/* Dropzone */}
-      <div className="dropzone"
-        onDrop={e=>{e.preventDefault(); const f=e.dataTransfer.files[0]; if(f?.name.endsWith(".zip")) setFile(f);}}
-        onDragOver={e=>e.preventDefault()}
-        onClick={()=>document.getElementById("fileInput")?.click()}
-        style={{marginBottom:16}}>
-        <input id="fileInput" type="file" accept=".zip" style={{display:"none"}} onChange={e=>setFile(e.target.files?.[0]||null)} />
-        <div className="dropzone-icon">📤</div>
-        {file ? <h3 style={{color:"#1e3a5f"}}>📎 {file.name}</h3> : <h3>Arrastra tu archivo .ZIP cifrado aquí</h3>}
-        <p>o <span className="dropzone-link">haz clic para seleccionar</span></p>
-        <p className="dropzone-note">Solo archivos .ZIP</p>
-      </div>
+        {/* Columna izquierda — formulario */}
+        <div style={{display:"flex", flexDirection:"column", gap:16}}>
 
-      {msg && <div className={`upload-msg${isError?" error":""}`} style={{marginBottom:16}}>{msg}</div>}
-
-      <button className="btn-submit" style={{padding:"12px 32px",fontSize:14,marginBottom:24,borderRadius:10}} onClick={submit} disabled={uploading}>
-        {uploading ? "⏳ Subiendo..." : "Subir archivo"}
-      </button>
-
-      {isAdmin && (
-        <div className="upload-table-wrap">
-          <div className="upload-table-header">
-            <h3>Mis últimos archivos</h3>
-            <span>{recent.length} registros</span>
+          {/* Selector de país */}
+          <div className="card" style={{padding:"20px 24px"}}>
+            <label style={{fontSize:13,fontWeight:600,color:"#374151",display:"block",marginBottom:8}}>País / Sede</label>
+            <select value={country} onChange={e=>setCountry(e.target.value)}
+              style={{width:"100%",padding:"10px 12px",border:"1.5px solid #e2e8f0",borderRadius:8,fontSize:14,outline:"none",background:"#fff"}}>
+              <option value="">Seleccionar país...</option>
+              {countries.map((c:any)=><option key={c.code} value={c.code}>{c.name}</option>)}
+            </select>
           </div>
-          <table>
-            <thead><tr><th>Archivo</th><th>Fecha</th><th>Tamaño</th><th>Estado</th></tr></thead>
-            <tbody>
-              {(recent as any[]).map((d,i)=>(
-                <tr key={i}>
-                  <td><div className="td-file">📄 {d.name}</div></td>
-                  <td>{d.date || new Date(d.lastModified).toLocaleDateString("es-PE")}</td>
-                  <td>{d.size || "—"}</td>
-                  <td><StatusPill s={d.status} /></td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+
+          {/* Dropzone */}
+          <div className="dropzone"
+            onDrop={e=>{e.preventDefault(); const f=e.dataTransfer.files[0]; if(f?.name.endsWith(".zip")) setFile(f);}}
+            onDragOver={e=>e.preventDefault()}
+            onClick={()=>document.getElementById("fileInput")?.click()}
+            style={{marginBottom:0}}>
+            <input id="fileInput" type="file" accept=".zip" style={{display:"none"}} onChange={e=>setFile(e.target.files?.[0]||null)} />
+            <div className="dropzone-icon">📤</div>
+            {file
+              ? <h3 style={{color:"#1e3a5f"}}>📎 {file.name}</h3>
+              : <h3>Arrastra tu archivo .ZIP cifrado aquí</h3>}
+            <p>o <span className="dropzone-link">haz clic para seleccionar</span></p>
+            <p className="dropzone-note">Solo archivos .ZIP</p>
+          </div>
+
+          {msg && <div className={`upload-msg${isError?" error":""}`}>{msg}</div>}
+
+          <button
+            className="btn-submit"
+            style={{padding:"14px 32px",fontSize:15,borderRadius:10,width:"100%"}}
+            onClick={submit}
+            disabled={uploading}>
+            {uploading ? "⏳ Subiendo..." : "📤 Subir archivo"}
+          </button>
         </div>
-      )}
+
+        {/* Columna derecha — historial */}
+        {isAdmin && (
+          <div className="upload-table-wrap" style={{height:"100%"}}>
+            <div className="upload-table-header">
+              <h3>Mis últimos archivos</h3>
+              <span>{recent.length} registros</span>
+            </div>
+            <table>
+              <thead>
+                <tr><th>Archivo</th><th>Fecha</th><th>Tamaño</th><th>Estado</th></tr>
+              </thead>
+              <tbody>
+                {(recent as any[]).map((d,i)=>(
+                  <tr key={i}>
+                    <td><div className="td-file">📄 {d.name}</div></td>
+                    <td>{d.date || (d.lastModified ? new Date(d.lastModified).toLocaleDateString("es-PE") : "—")}</td>
+                    <td>{d.size || "—"}</td>
+                    <td><StatusPill s={d.status} /></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
     </div>
   );
 }
 
 // ── DOCUMENTOS ────────────────────────────────────────────
-function DocumentosPage({ docs }: any) {
+function DocumentosPage({ docs, apiLoaded, apiError }: any) {
   const [filter, setFilter] = useState("Todos");
   const [search, setSearch] = useState("");
   const [currentPage, setCurrentPage] = useState(1);
   const PER_PAGE = 6;
 
-  const rows = docs.length > 0 ? docs : [
-    { name:"informe_abril_2025.zip",    owner:"C. Mendoza", color:"#1e3a5f", date:"02 Abr 2025", size:"2.4 MB", status:"En revisión" },
-    { name:"contrato_proveedor_Q1.pdf", owner:"A. López",   color:"#e91e63", date:"28 Mar 2025", size:"1.1 MB", status:"Aprobado" },
-    { name:"politica_datos_v3.docx",    owner:"R. Gómez",   color:"#ff9800", date:"20 Mar 2025", size:"340 KB", status:"LIMPIO" },
-    { name:"informe_marzo_2025.zip",    owner:"C. Mendoza", color:"#1e3a5f", date:"01 Mar 2025", size:"1.8 MB", status:"Completado" },
-    { name:"auditoria_IT_2025.xlsx",    owner:"P. Vargas",  color:"#4caf50", date:"15 Feb 2025", size:"980 KB", status:"Aprobado" },
-    { name:"informe_febrero_2025.zip",  owner:"C. Mendoza", color:"#1e3a5f", date:"03 Feb 2025", size:"2.1 MB", status:"Completado" },
+  // Si la API ya respondió usamos sus datos (aunque sea array vacío).
+  // Solo mostramos fallback cuando la API nunca ha respondido todavía.
+  const rows = apiLoaded ? docs : [
+    { name:"informe_abril_2025.zip",    countryName:"Bluetab Solutions Peru",     date:"02 Abr 2025", size:"2.4 MB", status:"Unscanned" },
+    { name:"contrato_proveedor_Q1.zip", countryName:"Bluetab Solutions Espana",   date:"28 Mar 2025", size:"1.1 MB", status:"No threats found" },
+    { name:"politica_datos_v3.zip",     countryName:"Bluetab Solutions Argentina",date:"20 Mar 2025", size:"340 KB", status:"Scanning" },
+    { name:"informe_marzo_2025.zip",    countryName:"Bluetab Solutions Peru",     date:"01 Mar 2025", size:"1.8 MB", status:"No threats found" },
+    { name:"auditoria_IT_2025.zip",     countryName:"Bluetab Solutions Espana",   date:"15 Feb 2025", size:"980 KB", status:"Suspicious" },
+    { name:"informe_febrero_2025.zip",  countryName:"Bluetab Solutions Peru",     date:"03 Feb 2025", size:"2.1 MB", status:"Malicious" },
   ];
 
   const filtered = (rows as any[]).filter(r =>
-    (filter==="Todos" || r.status===filter || r.status===filter.toUpperCase()) &&
+    (filter === "Todos" || r.status === filter) &&
     (!search || r.name?.toLowerCase().includes(search.toLowerCase()))
   );
 
@@ -261,10 +296,38 @@ function DocumentosPage({ docs }: any) {
 
   return (
     <div>
-      <div className="page-header"><h1>Documentos</h1><p>Historial completo de documentos en EMPRESA_A</p></div>
+      <div className="page-header">
+        <h1>Documentos</h1>
+        <p>Historial de archivos ZIP — sttransferenciaarchivos / MENSUALES/BLUETAB_PERU</p>
+      </div>
+
+      {/* Banner de error si el backend falló */}
+      {apiError && (
+        <div style={{background:"#fef2f2",border:"1px solid #fecaca",borderRadius:8,padding:"10px 16px",marginBottom:16,fontSize:13,color:"#b91c1c"}}>
+          ⚠️ Error al conectar con el backend: <strong>{apiError}</strong>
+          <span style={{color:"#94a3b8",marginLeft:8}}>— Asegúrate que <code>func start</code> esté corriendo en el puerto 7071</span>
+        </div>
+      )}
+
+      {/* Indicador de carga inicial */}
+      {!apiLoaded && (
+        <div style={{background:"#eff6ff",border:"1px solid #bfdbfe",borderRadius:8,padding:"10px 16px",marginBottom:16,fontSize:13,color:"#1d4ed8"}}>
+          🔄 Cargando documentos desde Azure Storage...
+        </div>
+      )}
       <div className="docs-filters">
-        {["Todos","En revisión","Aprobado","Completado","Limpio"].map(f=>(
-          <button key={f} className={`filter-btn${filter===f?" active":""}`} onClick={()=>{setFilter(f);setCurrentPage(1);}}>{f}</button>
+        {[
+          { label: "Todos",          value: "Todos"           },
+          { label: "Sin escanear",   value: "Unscanned"       },
+          { label: "Escaneando",     value: "Scanning"        },
+          { label: "Sin amenazas",   value: "No threats found"},
+          { label: "Sospechoso",     value: "Suspicious"      },
+          { label: "Malicioso",      value: "Malicious"       },
+        ].map(f=>(
+          <button key={f.value} className={`filter-btn${filter===f.value?" active":""}`}
+            onClick={()=>{setFilter(f.value);setCurrentPage(1);}}>
+            {f.label}
+          </button>
         ))}
         <div className="doc-search">
           <span>🔍</span>
@@ -272,6 +335,13 @@ function DocumentosPage({ docs }: any) {
         </div>
       </div>
       <div className="card">
+        {rows.length === 0 && apiLoaded && !apiError ? (
+          <div style={{padding:"48px 24px",textAlign:"center",color:"#94a3b8"}}>
+            <div style={{fontSize:40,marginBottom:12}}>📂</div>
+            <div style={{fontSize:15,fontWeight:600,color:"#475569"}}>No hay archivos en MENSUALES/BLUETAB_PERU</div>
+            <div style={{fontSize:13,marginTop:6}}>Sube tu primer archivo ZIP desde la sección "Subir Archivo"</div>
+          </div>
+        ) : (
         <table>
           <thead>
             <tr><th>#</th><th>Nombre del archivo</th><th>Propietario</th><th>Fecha</th><th>Tamaño</th><th>Estado</th></tr>
@@ -296,6 +366,7 @@ function DocumentosPage({ docs }: any) {
             ))}
           </tbody>
         </table>
+        )}
         <div className="pagination">
           <span className="pagination-info">Mostrando {(currentPage-1)*PER_PAGE+1}–{Math.min(currentPage*PER_PAGE,filtered.length)} de {filtered.length} documentos</span>
           <div className="page-btns">
@@ -633,6 +704,8 @@ export default function DashboardPage() {
   const [docs, setDocs]           = useState<DocItem[]>([]);
   const [countries, setCountries] = useState<any[]>([]);
   const [collapsed, setCollapsed] = useState(false);
+  const [apiError, setApiError]   = useState<string>("");
+  const [apiLoaded, setApiLoaded] = useState(false);
 
   // Rol: en producción se lee del token de Azure AD
   const isAdmin = true; // simplificado hasta implementar roles en Azure AD
@@ -642,8 +715,19 @@ export default function DashboardPage() {
       const r = await axios.get(`${API_BASE_URL}/documents`);
       setDocs(r.data.documents || []);
       setCountries(r.data.countries || []);
-    } catch { /* silencioso */ }
+      setApiError("");
+      setApiLoaded(true);
+    } catch (e: any) {
+      setApiError(e?.response?.data?.error || e?.message || "Error desconocido");
+      setApiLoaded(true);
+    }
   }, []);
+
+  useEffect(() => {
+    fetchDocs();
+    const t = setInterval(fetchDocs, 15000);
+    return () => clearInterval(t);
+  }, [fetchDocs]);
 
   useEffect(() => {
     fetchDocs();
@@ -666,8 +750,8 @@ export default function DashboardPage() {
         <Topbar section={sections[page]} user={user} />
         <div className="content">
           {page==="inicio"     && <InicioPage     docs={docs} onUpload={()=>setPage("subir")} userName={user?.name||"Usuario"} />}
-          {page==="subir"      && <SubirPage      docs={docs} countries={countries} onUploaded={fetchDocs} userName={user?.name||"Usuario"} isAdmin={isAdmin} />}
-          {page==="documentos" && isAdmin && <DocumentosPage docs={docs} />}
+          {page==="subir"      && <SubirPage      docs={docs} countries={countries} onUploaded={fetchDocs} userName={user?.name||"Usuario"} userEmail={user?.username||""} isAdmin={isAdmin} />}
+          {page==="documentos" && isAdmin && <DocumentosPage docs={docs} apiLoaded={apiLoaded} apiError={apiError} />}
           {page==="reportes"   && isAdmin && <ReportesPage />}
         </div>
       </div>

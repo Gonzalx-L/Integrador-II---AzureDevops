@@ -12,20 +12,23 @@ export function getBlobServiceClient(connectionStringEnvVar: string): BlobServic
 }
 
 /**
- * Sube un buffer como blob a un contenedor.
+ * Sube un buffer como blob a un contenedor con metadata opcional.
  */
 export async function uploadBlob(
   connectionStringEnvVar: string,
   containerName: string,
   blobPath: string,
-  content: Buffer
+  content: Buffer,
+  metadata?: Record<string, string>
 ): Promise<string> {
   const client = getBlobServiceClient(connectionStringEnvVar);
   const containerClient = client.getContainerClient(containerName);
   await containerClient.createIfNotExists();
 
   const blockBlobClient = containerClient.getBlockBlobClient(blobPath);
-  await blockBlobClient.upload(content, content.length);
+  await blockBlobClient.upload(content, content.length, {
+    metadata: metadata || {}
+  });
 
   return blockBlobClient.url;
 }

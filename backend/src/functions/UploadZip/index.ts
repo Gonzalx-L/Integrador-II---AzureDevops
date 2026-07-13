@@ -36,6 +36,13 @@ export async function uploadZip(
     const formData = await request.formData();
     const file = formData.get("file") as (Blob & { name: string; arrayBuffer(): Promise<ArrayBuffer> }) | null;
     const countryCode = formData.get("countryCode") as string | null;
+    // Nombre del usuario que sube el archivo (viene del frontend via MSAL)
+    const uploaderRaw = (formData.get("uploader") as string | null) || "";
+    // Extraer solo el nombre antes del @ y del separador de dominio
+    // Ej: "Antony@lozano13al000hotmail.onmicrosoft.com" → "Antony"
+    const uploader = uploaderRaw.includes("@")
+      ? uploaderRaw.split("@")[0]
+      : uploaderRaw || "Desconocido";
 
     // Validaciones
     if (!file) {
@@ -70,7 +77,7 @@ export async function uploadZip(
       return {
         status: 400,
         headers: corsHeaders,
-        jsonBody: { error: "Solo se permiten archivos ZIP." }
+        jsonBody: { error: "Solo se permiten archivos .ZIP." }
       };
     }
 
@@ -79,15 +86,17 @@ export async function uploadZip(
     const fileBuffer = Buffer.from(arrayBuffer);
     const fileId = uuidv4();
     const fileName = `${fileId}_${file.name}`;
-    const blobPath = `MENSUALES/${country.storagePath}/${fileName}`;
+    // Ruta fija según lineamiento: siempre MENSUALES/BLUETAB_PERU/
+    const blobPath = `MENSUALES/BLUETAB_PERU/${fileName}`;
     const containerName = process.env["CONTAINER_TRANSFERENCIA"] || "transferencia-archivos";
 
-    // Subir a Blob Storage
+    // Subir a Blob Storage con metadata del uploader
     await uploadBlob(
       "STORAGE_TRANSFERENCIA_CONNECTION",
       containerName,
       blobPath,
-      fileBuffer
+      fileBuffer,
+      { uploader }  // guardado en metadata del blob
     );
 
     context.log(`Archivo subido: ${blobPath}`);

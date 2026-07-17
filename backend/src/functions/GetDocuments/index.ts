@@ -84,9 +84,14 @@ export async function getDocuments(
 
     // Iterar sobre cada país permitido
     for (const country of countriesToQuery) {
-      // Prefijo raíz de la región: {storagePath}/
-      const PREFIX = `${country.storagePath}/`;
+      // Prefijo raíz de la región — busca en MENSUALES/{storagePath}/ (ruta legacy)
+      // y también en {storagePath}/ (ruta nueva por fecha)
+      const PREFIXES = [
+        `MENSUALES/${country.storagePath}/`,
+        `${country.storagePath}/`,
+      ];
 
+      for (const PREFIX of PREFIXES) {
       for await (const blob of containerClient.listBlobsFlat({
         prefix: PREFIX,
         includeMetadata: true
@@ -101,7 +106,6 @@ export async function getDocuments(
         const name = rawName.replace(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}_/i, "");
 
         // Extraer carpeta de fecha de la ruta: {storagePath}/{DD-MM-YYYY}/{uuid}_archivo.zip
-        // pathParts[0] = storagePath, pathParts[1] = DD-MM-YYYY, pathParts[2] = archivo
         const pathParts  = blob.name.split("/");
         const dateFolder = pathParts.length >= 2 ? pathParts[1] : "—";
 
@@ -132,12 +136,11 @@ export async function getDocuments(
           owner:        blob.metadata?.["uploader"] || "—",
           status:       defenderStatus,
           size:         formatSize(blob.properties.contentLength),
-          // uploadedAt del metadata = momento exacto de subida en UTC
-          // lastModified = fallback si es un blob antiguo sin metadata
           lastModified: uploadedAt,
         });
       }
-    }
+      } // fin for PREFIXES
+    } // fin for countriesToQuery
 
     // Más reciente primero
     documents.sort((a, b) =>

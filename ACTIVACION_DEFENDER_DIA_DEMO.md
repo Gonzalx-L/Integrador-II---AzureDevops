@@ -6,43 +6,48 @@
 
 ---
 
-## Contexto
+## Estado actual del proyecto
 
-El código ya está listo. Hay dos funciones conviviendo:
+✅ Código desplegado en producción (`func-docucolab-dev.azurewebsites.net`)  
+✅ Frontend desplegado en Azure Static Web Apps  
+✅ Función `OnDefenderEventGrid` lista en el backend  
+✅ El resto del pipeline (colas, blobs, Key Vault) ya funciona  
 
-| Función | Cuándo actúa |
-|---|---|
-| `OnDefenderScanResultQueue` | Cuando `DEFENDER_MOCK=true` (desarrollo local) |
-| `OnDefenderEventGrid` | Cuando Defender real está activo y publica en Event Grid |
-
-No hay que cambiar nada en el código. Solo activar Defender y conectar el Event Grid.
+**Solo faltan 3 pasos en el Portal de Azure. Nada de código.**
 
 ---
 
-## PASO 1 — Habilitar Malware Scanning en el Storage Account
+## PASO 1 — Activar Defender en el Storage Account
 
-1. Ir al [Portal de Azure](https://portal.azure.com)
-2. Buscar el storage account: **`sttransferenciaarchivos`**
+1. Ir a [portal.azure.com](https://portal.azure.com)
+2. Buscar y abrir: **`sttransferenciaarchivos`**
 3. En el menú izquierdo → **Microsoft Defender for Cloud**
-4. Hacer clic en **"Enable"** (o "Habilitar")
-5. Asegurarse que esté activado:
-   - ✅ **Defender for Storage** → On
-   - ✅ **Malware Scanning** → On
+4. Hacer clic en **Enable**
+5. Activar:
+   - ✅ Defender for Storage → **On**
+   - ✅ Malware Scanning → **On**
 6. Guardar
 
-> ⚠️ Solo activarlo en `sttransferenciaarchivos`. El `stdocumentoscolab` no necesita Defender porque ahí solo llegan archivos ya limpios.
+> Solo activarlo en `sttransferenciaarchivos`. El `stdocumentoscolab` no lo necesita.
 
 ---
 
-## PASO 2 — Conectar Defender con el Event Grid Topic
+## PASO 2 — Configurar que Defender publique en Event Grid
 
-Cuando Defender termina de escanear un blob, publica el resultado en un Event Grid.  
-Hay que suscribir ese evento a la Azure Function `OnDefenderEventGrid`.
+1. Seguir en **`sttransferenciaarchivos`** → Microsoft Defender for Cloud
+2. Buscar la sección **Malware Scanning** → configuración avanzada
+3. En **"Send scan results to"** → seleccionar **Event Grid Topic**
+4. Elegir: **`evgt-transferenciaarch-dev`**
+5. Guardar
 
-1. En el Portal → buscar **Event Grid Topics**
+---
+
+## PASO 3 — Crear la suscripción en Event Grid
+
+1. En el Portal buscar: **Event Grid Topics**
 2. Abrir: **`evgt-transferenciaarch-dev`**
-3. Ir a **"Event Subscriptions"** → **"+ Event Subscription"**
-4. Completar el formulario:
+3. Ir a **Event Subscriptions** → **+ Event Subscription**
+4. Completar:
 
 | Campo | Valor |
 |---|---|
@@ -50,97 +55,67 @@ Hay que suscribir ese evento a la Azure Function `OnDefenderEventGrid`.
 | Event Schema | Event Grid Schema |
 | Filter to Event Types | `Microsoft.Security.MalwareScanningResult` |
 | Endpoint Type | **Azure Function** |
-| Endpoint | Seleccionar `func-docucolab-dev` → función `OnDefenderEventGrid` |
+| Endpoint | `func-docucolab-dev` → función `OnDefenderEventGrid` |
 
-5. Crear la suscripción
-
----
-
-## PASO 3 — Configurar el Storage Account para publicar en Event Grid
-
-Defender necesita saber a qué Event Grid Topic publicar el resultado.
-
-1. Ir al storage account **`sttransferenciaarchivos`**
-2. Microsoft Defender for Cloud → configuración avanzada
-3. En "Malware Scanning" → "Send scan results to" → elegir **Event Grid Topic**
-4. Seleccionar: **`evgt-transferenciaarch-dev`**
-5. Guardar
+5. Crear
 
 ---
 
-## PASO 4 — Desplegar el backend con la nueva función
+## Eso es todo. Así funciona el flujo completo
 
-La función `OnDefenderEventGrid` ya está en el código. Solo hay que deployar.
-
-```bash
-cd backend
-npm run build
-func azure functionapp publish func-docucolab-dev
 ```
-
-Verificar en el portal que aparezca la función `OnDefenderEventGrid` en la lista.
-
----
-
-## PASO 5 — Verificar que funciona (prueba rápida)
-
-1. Abrir el frontend de DocuColab
-2. Login con cualquier usuario (ej: `UploadPeru@lozano13al000hotmail.onmicrosoft.com`)
-3. Subir un ZIP pequeño (un Word de una hoja comprimido)
-4. Esperar ~30 segundos
-5. Ir a **Documentos** — el estado debe cambiar de `⏳ Sin escanear` a `✅ Sin amenazas`
-
-Si el estado no cambia en 2 minutos, revisar los logs de la Function App en el portal.
+Subís un ZIP desde el frontend
+        ↓
+Llega a sttransferenciaarchivos (Blob Storage)
+        ↓
+Defender lo escanea automáticamente (~30 segundos)
+        ↓
+Publica resultado en evgt-transferenciaarch-dev (Event Grid)
+        ↓
+OnDefenderEventGrid recibe el evento
+        ↓
+Encola en queue-zip-limpios o queue-zip-error
+        ↓
+OnCleanZipFromQueue / OnErrorZipFromQueue procesan el archivo
+        ↓
+El estado aparece en el frontend: ✅ Sin amenazas / 🚫 Malicioso
+```
 
 ---
 
 ## Qué se ve en el frontend
 
-### Tabla de Documentos
-Cada archivo muestra el estado real que escribió Defender:
+**Tabla de Documentos** — estado real de Defender por archivo:
 
-| Estado | Qué significa |
+| Estado | Significado |
 |---|---|
 | ✅ Sin amenazas | Defender escaneó y no encontró nada |
 | 🚫 Malicioso | Defender detectó malware o ransomware |
-| ⚠️ Sospechoso | Comportamiento anómalo, requiere revisión |
+| ⚠️ Sospechoso | Comportamiento anómalo |
 | 🔍 Escaneando | Defender está procesando |
-| ⏳ Sin escanear | Blob recién subido, aún no escaneado |
+| ⏳ Sin escanear | Blob recién subido, aún no procesado |
 
-### Reporte PDF
-Cada archivo tiene un botón **"📄 PDF"** que genera un reporte con:
-- Nombre, región, tamaño, fecha/hora local del país
-- Estado de Defender con color (verde/rojo/naranja)
-- Descripción en español de lo que encontró
+**Reporte PDF** — botón 📄 PDF por cada archivo, incluye el resultado de Defender con color y descripción en español.
 
-### Dashboard de inicio
-Las tarjetas de estadísticas se actualizan con los conteos reales:
-- Documentos subidos
-- Sin amenazas (No threats found)
-- Maliciosos / Error
-- Escaneando / Sin escanear
+**Dashboard de inicio** — tarjetas con conteo real de archivos limpios, maliciosos y pendientes.
 
 ---
 
-## PASO 6 — Apagar Defender al terminar
+## Al terminar la demo — apagar Defender
 
-1. Portal de Azure → **`sttransferenciaarchivos`**
-2. Microsoft Defender for Cloud → **Off**
+1. Portal → **`sttransferenciaarchivos`** → Microsoft Defender for Cloud
+2. Toggle → **Off**
 3. Guardar
 
-Factura final: proporcional a las horas activo. Si lo usás 4 horas de un mes de 720 horas → `$10 × (4/720)` = **$0.055 USD** + scanning (`~$0.00015 USD`).
+Factura final proporcional: si lo usás 4 horas → **~$0.06 USD**.
 
 ---
 
-## Resumen de lo que ya está listo en el código
+## Resumen de archivos tocados
 
-| Archivo | Estado |
+| Archivo | Qué hace |
 |---|---|
-| `backend/src/functions/OnDefenderEventGrid/index.ts` | ✅ Nuevo — recibe eventos reales de Defender |
-| `backend/src/functions/OnDefenderScanResultQueue/index.ts` | ✅ Sin cambios — sigue siendo el mock para dev |
-| `backend/src/index.ts` | ✅ Registra ambas funciones |
-| `backend/src/functions/OnCleanZipFromQueue/index.ts` | ✅ Sin cambios — procesa limpios igual |
-| `backend/src/functions/OnErrorZipFromQueue/index.ts` | ✅ Sin cambios — procesa errores igual |
-| `frontend/src/pages/DashboardPage.tsx` | ✅ Ya muestra estados reales de Defender |
-
-No hay nada más que cambiar en el código. Todo listo para el día de la demo.
+| `backend/src/functions/OnDefenderEventGrid/index.ts` | Recibe eventos reales de Defender vía Event Grid |
+| `backend/src/functions/OnDefenderScanResultQueue/index.ts` | Mock para desarrollo local (sin cambios) |
+| `backend/src/index.ts` | Registra ambas funciones |
+| `.github/workflows/deploy.yml` | Deploy corregido — ya no falla el backend |

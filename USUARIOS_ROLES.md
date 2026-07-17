@@ -47,6 +47,7 @@ Contraseña temporal para todos: `TempPass123!` *(se fuerza cambio al primer log
 | `UploadEspana@lozano13al000hotmail.onmicrosoft.com` | `TempPass123!` | Colaborador | ESPANA |
 | `UploadArgentina@lozano13al000hotmail.onmicrosoft.com` | `TempPass123!` | Colaborador | ARGENTINA |
 | `UploadNuevaZelanda@lozano13al000hotmail.onmicrosoft.com` | `TempPass123!` | Colaborador | NUEVA_ZELANDA |
+| `Antony@lozano13al000hotmail.onmicrosoft.com` | `TempPass123!` | Colaborador | ESPANA |
 
 ---
 

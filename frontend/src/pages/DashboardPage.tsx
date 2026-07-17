@@ -215,14 +215,21 @@ function InicioPage({ docs, onUpload, userName, allowedRegions }: { docs: DocIte
 }
 
 // ── SUBIR ARCHIVO ─────────────────────────────────────────
-function SubirPage({ docs, countries, onUploaded, userName, isAdmin, userEmail, allowedRegions }: any) {
-  const [file, setFile]       = useState<File|null>(null);
-  const [country, setCountry] = useState("");
-  const [msg, setMsg]         = useState("");
-  const [isError, setIsError] = useState(false);
+function SubirPage({ docs, countries, onUploaded, userName, userEmail, allowedRegions }: any) {
+  const [file, setFile]           = useState<File|null>(null);
+  const [country, setCountry]     = useState("");
+  const [msg, setMsg]             = useState("");
+  const [isError, setIsError]     = useState(false);
   const [uploading, setUploading] = useState(false);
 
-  // Filtrar países según las regiones del rol del token — directo, sin inferencias
+  // Historial — filtros para la vista colaborador
+  const [histFilter, setHistFilter] = useState("Todos");
+  const [histSearch, setHistSearch] = useState("");
+  const [histDate,   setHistDate]   = useState("");
+  const [histPage,   setHistPage]   = useState(1);
+  const HIST_PER_PAGE = 5;
+
+  // Filtrar países según las regiones del rol del token
   const availableCountries = allowedRegions.length > 0
     ? countries.filter((c: any) => allowedRegions.includes(c.code))
     : countries;
@@ -234,7 +241,6 @@ function SubirPage({ docs, countries, onUploaded, userName, isAdmin, userEmail, 
       const form = new FormData();
       form.append("file", file);
       form.append("countryCode", country);
-      // Enviar el email del usuario para guardarlo en el metadata del blob
       if (userEmail) form.append("uploader", userEmail);
       await axios.post(`${API_BASE_URL}/upload`, form);
       setMsg("✅ Archivo subido exitosamente. El escaneo iniciará en breve.");
@@ -245,7 +251,127 @@ function SubirPage({ docs, countries, onUploaded, userName, isAdmin, userEmail, 
     } finally { setUploading(false); }
   };
 
-  const recent = docs.slice(0, 5); // siempre datos reales del storage
+  // Filtrar historial por nombre, estado y fecha
+  const myDocs = docs.filter((d: any) => {
+    const matchStatus = histFilter === "Todos" || d.status === histFilter;
+    const matchSearch = !histSearch || d.name?.toLowerCase().includes(histSearch.toLowerCase());
+    const matchDate   = !histDate   || (d.lastModified && d.lastModified.startsWith(histDate));
+    return matchStatus && matchSearch && matchDate;
+  });
+  const histTotal = myDocs.length;
+  const histPages = Math.ceil(histTotal / HIST_PER_PAGE);
+  const histRows  = myDocs.slice((histPage-1)*HIST_PER_PAGE, histPage*HIST_PER_PAGE);
+
+  // Descarga via URL SAS temporal generada por el backend
+  const downloadFile = async (d: any) => {
+    try {
+      const res = await axios.get(
+        `${API_BASE_URL}/download?path=${encodeURIComponent(d.path)}`
+      );
+      const { sasUrl, fileName } = res.data;
+      // Abrir la URL SAS — el navegador descarga directo desde Azure Storage
+      const a = document.createElement("a");
+      a.href     = sasUrl;
+      a.download = fileName || d.name;
+      a.target   = "_blank";
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+    } catch (e: any) {
+      alert(`No se pudo descargar el archivo: ${e?.response?.data?.error || e.message}`);
+    }
+  };
+
+  // Reporte PDF individual del archivo
+  const downloadReport = (d: any) => {
+    const doc  = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
+    const W    = 210;
+    const now  = new Date();
+    const tz   = d.timezone || "America/Lima";
+    const { date, time, ampm, tzLabel } = formatLocalDateTime(d.lastModified, tz);
+    const chip = REGION_CHIP[d.country || "PERU"];
+
+    // Header azul
+    doc.setFillColor(30, 58, 95);
+    doc.rect(0, 0, W, 28, "F");
+    doc.setTextColor(80, 60, 180); doc.setFontSize(20); doc.setFont("helvetica","bold");
+    doc.text("/", 11, 19);
+    doc.setTextColor(80, 60, 180); doc.setFontSize(18); doc.text("blue", 16, 19);
+    doc.setTextColor(210, 70, 30); doc.text("tab", 34, 19);
+    doc.setFontSize(6); doc.setFont("helvetica","normal"); doc.setTextColor(200,200,200);
+    doc.text("an IBM Company", 11, 23);
+    doc.setFontSize(12); doc.setFont("helvetica","bold"); doc.setTextColor(255,255,255);
+    doc.text("Reporte de Archivo — DocuColab", W-10, 13, {align:"right"});
+    doc.setFontSize(8); doc.setFont("helvetica","normal");
+    doc.text("Azure Defender for Storage · Bluetab Solutions", W-10, 19, {align:"right"});
+
+    doc.setFontSize(8); doc.setTextColor(100,116,139); doc.setFont("helvetica","italic");
+    doc.text(`Generado el: ${now.toLocaleDateString("es-PE")} ${now.toLocaleTimeString("es-PE")}`, 10, 34);
+    doc.text("Clasificación: Uso interno", W-10, 34, {align:"right"});
+
+    let y = 44;
+
+    // Sección datos del archivo
+    doc.setFillColor(241,245,249); doc.rect(10,y,W-20,7,"F");
+    doc.setTextColor(30,58,95); doc.setFontSize(10); doc.setFont("helvetica","bold");
+    doc.text("INFORMACIÓN DEL ARCHIVO", 13, y+5);
+    y += 12;
+
+    const rows2: [string,string][] = [
+      ["Nombre",    d.name],
+      ["Región",    chip ? `${chip.flag} ${chip.label}` : d.countryName || "—"],
+      ["Tamaño",    String(d.size || "—")],
+      ["Subido por",d.owner || "—"],
+      ["Fecha",     `${date} ${time} ${ampm} (${tzLabel})`],
+      ["Ruta",      d.path],
+    ];
+    rows2.forEach(([label, val]) => {
+      doc.setFontSize(8); doc.setFont("helvetica","bold"); doc.setTextColor(100,116,139);
+      doc.text(label, 14, y+5);
+      doc.setFont("helvetica","normal"); doc.setTextColor(30,41,59);
+      doc.text(String(val), 55, y+5);
+      y += 8;
+    });
+    y += 6;
+
+    // Sección estado Defender
+    doc.setFillColor(241,245,249); doc.rect(10,y,W-20,7,"F");
+    doc.setTextColor(30,58,95); doc.setFontSize(10); doc.setFont("helvetica","bold");
+    doc.text("RESULTADO AZURE DEFENDER FOR STORAGE", 13, y+5);
+    y += 14;
+
+    const statusEs = DEFENDER_LABEL[d.status]?.replace(/^[^\s]+\s/,"") || d.status;
+    const statusColors: Record<string,[number,number,number]> = {
+      "No threats found": [22,163,74], "Malicious": [220,38,38],
+      "Suspicious": [234,88,12], "Scanning": [29,78,216], "Unscanned": [100,116,139],
+    };
+    const [sr,sg,sb] = statusColors[d.status] ?? [100,116,139];
+    doc.setFillColor(sr,sg,sb);
+    doc.roundedRect(14, y, 60, 10, 3, 3, "F");
+    doc.setTextColor(255,255,255); doc.setFontSize(10); doc.setFont("helvetica","bold");
+    doc.text(statusEs, 44, y+7, {align:"center"});
+    y += 18;
+
+    doc.setFontSize(8); doc.setFont("helvetica","normal"); doc.setTextColor(100,116,139);
+    const desc: Record<string,string> = {
+      "No threats found": "El archivo fue analizado por Azure Defender y no se encontraron amenazas. Es seguro para su uso.",
+      "Malicious":        "Azure Defender detectó contenido malicioso en este archivo. No debe ser descargado ni ejecutado.",
+      "Suspicious":       "Azure Defender detectó comportamiento sospechoso. Se recomienda revisión manual antes de usar.",
+      "Scanning":         "Azure Defender está analizando este archivo. El resultado estará disponible en breve.",
+      "Unscanned":        "El archivo aún no ha sido procesado por Azure Defender for Storage.",
+    };
+    const lines = doc.splitTextToSize(desc[d.status] || "Estado desconocido.", W-28);
+    doc.text(lines, 14, y);
+    y += lines.length * 5 + 10;
+
+    // Footer
+    doc.setFillColor(30,58,95); doc.rect(0,287,W,10,"F");
+    doc.setTextColor(255,255,255); doc.setFontSize(7); doc.setFont("helvetica","normal");
+    doc.text("/bluetab an IBM Company — DocuColab | Documento de uso interno", 10, 293);
+    doc.text(`${now.toLocaleDateString("es-PE")}`, W-10, 293, {align:"right"});
+
+    doc.save(`reporte-${d.name.replace(".zip","")}.pdf`);
+  };
 
   const nombre = (userName || "Usuario").split(" ")[0];
 
@@ -256,13 +382,11 @@ function SubirPage({ docs, countries, onUploaded, userName, isAdmin, userEmail, 
         <p>Solo se aceptan archivos .ZIP cifrados · Plazo: 30 de mayo</p>
       </div>
 
-      {/* Layout dos columnas */}
-      <div style={{display:"grid", gridTemplateColumns:"1fr 1fr", gap:24, alignItems:"start"}}>
+      {/* ── FILA SUPERIOR: formulario + stats rápidas ── */}
+      <div style={{display:"grid", gridTemplateColumns:"1fr 1fr", gap:24, marginBottom:24, alignItems:"start"}}>
 
         {/* Columna izquierda — formulario */}
         <div style={{display:"flex", flexDirection:"column", gap:16}}>
-
-          {/* Selector de país */}
           <div className="card" style={{padding:"20px 24px"}}>
             <label style={{fontSize:13,fontWeight:600,color:"#374151",display:"block",marginBottom:8}}>País / Sede</label>
             <select value={country} onChange={e=>setCountry(e.target.value)}
@@ -271,83 +395,146 @@ function SubirPage({ docs, countries, onUploaded, userName, isAdmin, userEmail, 
               {availableCountries.map((c:any)=><option key={c.code} value={c.code}>{c.name}</option>)}
             </select>
           </div>
-
-          {/* Dropzone */}
           <div className="dropzone"
             onDrop={e=>{e.preventDefault(); const f=e.dataTransfer.files[0]; if(f?.name.endsWith(".zip")) setFile(f);}}
             onDragOver={e=>e.preventDefault()}
-            onClick={()=>document.getElementById("fileInput")?.click()}
-            style={{marginBottom:0}}>
+            onClick={()=>document.getElementById("fileInput")?.click()}>
             <input id="fileInput" type="file" accept=".zip" style={{display:"none"}} onChange={e=>setFile(e.target.files?.[0]||null)} />
             <div className="dropzone-icon">📤</div>
-            {file
-              ? <h3 style={{color:"#1e3a5f"}}>📎 {file.name}</h3>
-              : <h3>Arrastra tu archivo .ZIP cifrado aquí</h3>}
+            {file ? <h3 style={{color:"#1e3a5f"}}>📎 {file.name}</h3> : <h3>Arrastra tu archivo .ZIP aquí</h3>}
             <p>o <span className="dropzone-link">haz clic para seleccionar</span></p>
             <p className="dropzone-note">Solo archivos .ZIP</p>
           </div>
-
           {msg && <div className={`upload-msg${isError?" error":""}`}>{msg}</div>}
-
-          <button
-            className="btn-submit"
-            style={{padding:"14px 32px",fontSize:15,borderRadius:10,width:"100%"}}
-            onClick={submit}
-            disabled={uploading}>
+          <button className="btn-submit" style={{padding:"14px 32px",fontSize:15,borderRadius:10,width:"100%"}}
+            onClick={submit} disabled={uploading}>
             {uploading ? "⏳ Subiendo..." : "📤 Subir archivo"}
           </button>
         </div>
 
-        {/* Columna derecha — historial (solo para admins) */}
-        {isAdmin && (
-          <div className="upload-table-wrap" style={{height:"100%"}}>
-            <div className="upload-table-header">
-              <h3>Mis últimos archivos</h3>
-              <span>{recent.length} registros</span>
-            </div>
-            {recent.length === 0 ? (
-              <div style={{padding:"32px 24px",textAlign:"center",color:"#94a3b8"}}>
-                <div style={{fontSize:32,marginBottom:8}}>📂</div>
-                <div style={{fontSize:13}}>Aún no hay archivos subidos</div>
+        {/* Columna derecha — tarjetas de resumen */}
+        <div style={{display:"flex",flexDirection:"column",gap:14}}>
+          {[
+            { icon:"📄", label:"Mis archivos",    val: docs.length,                                        color:"blue"   },
+            { icon:"✅", label:"Sin amenazas",     val: docs.filter((d:any)=>d.status==="No threats found").length, color:"green"  },
+            { icon:"⏳", label:"Sin escanear",     val: docs.filter((d:any)=>d.status==="Unscanned").length,        color:"orange" },
+            { icon:"🚫", label:"Con amenazas",     val: docs.filter((d:any)=>d.status==="Malicious"||d.status==="Suspicious").length, color:"red" },
+          ].map((s,i)=>(
+            <div key={i} className="stat-card" style={{flexDirection:"row",alignItems:"center",justifyContent:"space-between",padding:"16px 20px"}}>
+              <div style={{display:"flex",alignItems:"center",gap:12}}>
+                <div className={`stat-icon ${s.color}`} style={{width:40,height:40,fontSize:18}}>{s.icon}</div>
+                <div className="stat-label" style={{margin:0}}>{s.label}</div>
               </div>
-            ) : (
-            <table>
-              <thead>
-                <tr><th>Archivo</th><th>Fecha</th><th>Hora</th><th>Región</th><th>Tamaño</th><th>Estado</th></tr>
-              </thead>
-              <tbody>
-                {(recent as any[]).map((d,i) => {
-                  const tz   = d.timezone || country?.timezone || "UTC";
-                  const { date, time, ampm, tzLabel } = formatLocalDateTime(d.lastModified, tz);
-                  const chip = REGION_CHIP[d.country || d.countryCode || ""] || null;
-                  return (
-                    <tr key={i}>
-                      <td><div className="td-file">📄 {d.name}</div></td>
-                      <td>{date}</td>
-                      <td style={{fontVariantNumeric:"tabular-nums", whiteSpace:"nowrap"}}>
-                        <span style={{color:"#1e293b",fontSize:13,fontWeight:600}}>{time}</span>
-                        {" "}
-                        <span style={{fontSize:10,fontWeight:700,padding:"1px 5px",borderRadius:4,
-                          background:ampm==="AM"?"#dbeafe":"#fef3c7",
-                          color:ampm==="AM"?"#1d4ed8":"#92400e"}}>{ampm}</span>
-                        <span style={{fontSize:10,color:"#94a3b8",marginLeft:3}}>{tzLabel}</span>
-                      </td>
-                      <td>
-                        {chip
-                          ? <span style={{display:"inline-flex",alignItems:"center",gap:4,background:`${chip.color}18`,color:chip.color,borderRadius:6,padding:"2px 8px",fontSize:12,fontWeight:600}}>
-                              {chip.flag} {chip.label}
-                            </span>
-                          : <span style={{color:"#94a3b8",fontSize:12}}>—</span>
-                        }
-                      </td>
-                      <td>{d.size || "—"}</td>
-                      <td><StatusPill s={d.status} /></td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-            )}
+              <div className="stat-num" style={{fontSize:24}}>{s.val}</div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* ── HISTORIAL COMPLETO ── */}
+      <div className="card">
+        <div className="card-header" style={{padding:"16px 20px 12px"}}>
+          <h3>📋 Mi historial de archivos</h3>
+          <span style={{fontSize:12,color:"#94a3b8"}}>{histTotal} archivos</span>
+        </div>
+
+        {/* Filtros */}
+        <div style={{padding:"12px 20px",borderBottom:"1px solid #f1f5f9",display:"flex",gap:8,flexWrap:"wrap",alignItems:"center"}}>
+          {[
+            {label:"Todos",         value:"Todos"},
+            {label:"Sin escanear",  value:"Unscanned"},
+            {label:"Escaneando",    value:"Scanning"},
+            {label:"Sin amenazas",  value:"No threats found"},
+            {label:"Sospechoso",    value:"Suspicious"},
+            {label:"Malicioso",     value:"Malicious"},
+          ].map(f=>(
+            <button key={f.value} className={`filter-btn${histFilter===f.value?" active":""}`}
+              onClick={()=>{setHistFilter(f.value);setHistPage(1);}}>
+              {f.label}
+            </button>
+          ))}
+          {/* Búsqueda por nombre */}
+          <div className="doc-search" style={{marginLeft:"auto"}}>
+            <span>🔍</span>
+            <input placeholder="Buscar por nombre..." value={histSearch}
+              onChange={e=>{setHistSearch(e.target.value);setHistPage(1);}} />
+          </div>
+          {/* Filtro por fecha */}
+          <input type="date" value={histDate} onChange={e=>{setHistDate(e.target.value);setHistPage(1);}}
+            style={{padding:"6px 10px",border:"1.5px solid #e2e8f0",borderRadius:6,fontSize:13,color:"#374151",outline:"none"}}
+            title="Filtrar por fecha" />
+        </div>
+
+        {histRows.length === 0 ? (
+          <div style={{padding:"48px 24px",textAlign:"center",color:"#94a3b8"}}>
+            <div style={{fontSize:40,marginBottom:12}}>📂</div>
+            <div style={{fontSize:15,fontWeight:600,color:"#475569"}}>No hay archivos que coincidan</div>
+            <div style={{fontSize:13,marginTop:6}}>Sube tu primer archivo ZIP usando el formulario de arriba</div>
+          </div>
+        ) : (
+        <table>
+          <thead>
+            <tr>
+              <th>#</th><th>Nombre del archivo</th><th>Fecha</th><th>Hora</th>
+              <th>Tamaño</th><th>Estado</th><th style={{textAlign:"center"}}>Acciones</th>
+            </tr>
+          </thead>
+          <tbody>
+            {histRows.map((d:any, i:number) => {
+              const tz = d.timezone || "America/Lima";
+              const { date, time, ampm, tzLabel } = formatLocalDateTime(d.lastModified, tz);
+              return (
+                <tr key={i}>
+                  <td style={{color:"#94a3b8"}}>{(histPage-1)*HIST_PER_PAGE+i+1}</td>
+                  <td><div className="td-file">📄 {d.name}</div></td>
+                  <td style={{color:"#475569",fontSize:13}}>{date}</td>
+                  <td style={{fontVariantNumeric:"tabular-nums",whiteSpace:"nowrap"}}>
+                    <span style={{color:"#1e293b",fontSize:13,fontWeight:600}}>{time}</span>{" "}
+                    <span style={{fontSize:10,fontWeight:700,padding:"1px 5px",borderRadius:4,
+                      background:ampm==="AM"?"#dbeafe":"#fef3c7",
+                      color:ampm==="AM"?"#1d4ed8":"#92400e"}}>{ampm}</span>
+                    <span style={{fontSize:10,color:"#94a3b8",marginLeft:3}}>{tzLabel}</span>
+                  </td>
+                  <td style={{color:"#64748b",fontSize:13}}>{d.size||"—"}</td>
+                  <td><StatusPill s={d.status} /></td>
+                  <td>
+                    <div style={{display:"flex",gap:6,justifyContent:"center"}}>
+                      {/* Descargar archivo */}
+                      <button title="Descargar archivo" onClick={()=>downloadFile(d)}
+                        style={{background:"#eff6ff",color:"#1d4ed8",border:"none",borderRadius:6,
+                          padding:"5px 10px",fontSize:12,fontWeight:600,cursor:"pointer",
+                          display:"flex",alignItems:"center",gap:4}}>
+                        ⬇ ZIP
+                      </button>
+                      {/* Descargar reporte PDF */}
+                      <button title="Descargar reporte PDF" onClick={()=>downloadReport(d)}
+                        style={{background:"#fef2f2",color:"#dc2626",border:"none",borderRadius:6,
+                          padding:"5px 10px",fontSize:12,fontWeight:600,cursor:"pointer",
+                          display:"flex",alignItems:"center",gap:4}}>
+                        📄 PDF
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+        )}
+
+        {/* Paginación del historial */}
+        {histPages > 1 && (
+          <div className="pagination">
+            <span className="pagination-info">
+              Mostrando {(histPage-1)*HIST_PER_PAGE+1}–{Math.min(histPage*HIST_PER_PAGE,histTotal)} de {histTotal}
+            </span>
+            <div className="page-btns">
+              <button className="page-btn" onClick={()=>setHistPage(p=>Math.max(1,p-1))} disabled={histPage===1}>‹</button>
+              {Array.from({length:histPages},(_,i)=>i+1).map(n=>(
+                <button key={n} className={`page-btn${n===histPage?" active":""}`} onClick={()=>setHistPage(n)}>{n}</button>
+              ))}
+              <button className="page-btn" onClick={()=>setHistPage(p=>Math.min(histPages,p+1))} disabled={histPage===histPages}>›</button>
+            </div>
           </div>
         )}
       </div>
@@ -863,7 +1050,7 @@ export default function DashboardPage() {
     <div className="dash-layout">
       <Sidebar
         page={page} setPage={setPage} user={user}
-        onLogout={() => instance.logoutPopup()}
+        onLogout={() => instance.logoutRedirect({ postLogoutRedirectUri: "/" })}
         collapsed={collapsed} setCollapsed={setCollapsed}
         isAdmin={isAdmin} roleLabel={roleLabel}
       />

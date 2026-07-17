@@ -131,7 +131,7 @@ export async function getDocuments(
           country:      ccFromMeta,
           countryCode:  ccFromMeta,
           countryName:  country.name,
-          timezone:     tzFromMeta,
+          timezone:     tzFromMeta,   // siempre presente: del metadata o del config del país
           dateFolder,
           owner:        blob.metadata?.["uploader"] || "—",
           status:       defenderStatus,

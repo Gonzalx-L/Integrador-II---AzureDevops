@@ -44,10 +44,11 @@ function formatSize(bytes: number | undefined): string {
 /**
  * GetDocuments — HTTP Trigger
  * Retorna el historial de archivos ZIP en:
- *   sttransferenciaarchivos → transferencia-archivos → MENSUALES/BLUETAB_PERU/
+ *   sttransferenciaarchivos → transferencia-archivos → MENSUALES/{PAIS}/
  * con el estado real de Azure Defender por cada blob.
  *
- * GET /api/documents
+ * GET /api/documents?regions=PERU,ESPANA  (opcional — filtra por región)
+ * GET /api/documents                       (sin filtro → devuelve todo)
  */
 export async function getDocuments(
   request: HttpRequest,
@@ -63,51 +64,79 @@ export async function getDocuments(
     return { status: 204, headers: corsHeaders };
   }
 
-  // Ruta fija según lineamiento del proyecto
+  // Leer el query param "regions" para filtrar por país
+  const regionsParam = request.query.get("regions");
+  const allowedRegions: string[] = regionsParam
+    ? regionsParam.split(",").map(r => r.trim().toUpperCase()).filter(Boolean)
+    : [];
+
+  // Si hay regiones permitidas filtrar; si no, retornar todos los países
+  const countriesToQuery = allowedRegions.length > 0
+    ? COUNTRIES.filter(c => allowedRegions.includes(c.code))
+    : COUNTRIES;
+
   const containerName = process.env["CONTAINER_TRANSFERENCIA"] || "transferencia-archivos";
-  const PREFIX        = "MENSUALES/BLUETAB_PERU/";
 
   try {
     const client          = getBlobServiceClient("STORAGE_TRANSFERENCIA_CONNECTION");
     const containerClient = client.getContainerClient(containerName);
     const documents: any[] = [];
 
-    // Listar todos los blobs bajo MENSUALES/BLUETAB_PERU/
-    for await (const blob of containerClient.listBlobsFlat({
-      prefix: PREFIX,
-      includeMetadata: true   // lee el metadata "uploader" guardado al subir
-    })) {
-      // Solo archivos .zip — ignorar subcarpetas y logs internos
-      const rawName = blob.name.split("/").pop() ?? "";
-      if (!rawName.toLowerCase().endsWith(".zip")) continue;
+    // Iterar sobre cada país permitido
+    for (const country of countriesToQuery) {
+      // Prefijo raíz de la región: {storagePath}/
+      const PREFIX = `${country.storagePath}/`;
 
-      // Quitar el prefijo UUID del nombre: "{uuid}_{nombre_original}.zip" → "{nombre_original}.zip"
-      // Formato: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx_{nombre}.zip
-      const name = rawName.replace(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}_/i, "");
+      for await (const blob of containerClient.listBlobsFlat({
+        prefix: PREFIX,
+        includeMetadata: true
+      })) {
+        const rawName = blob.name.split("/").pop() ?? "";
+        if (!rawName.toLowerCase().endsWith(".zip")) continue;
 
-      // Pedir los tags individualmente — includeTags en listBlobsFlat
-      // no siempre los retorna si Defender aún no los escribió.
-      let tags: Record<string, string> | undefined;
-      try {
-        const blobClient = containerClient.getBlobClient(blob.name);
-        const tagsResult = await blobClient.getTags();
-        tags = tagsResult.tags;
-      } catch {
-        tags = undefined;
+        // Ignorar subcarpeta DESBLOQUEADOS — solo mostrar archivos originales subidos
+        if (blob.name.includes("/DESBLOQUEADOS/")) continue;
+
+        // Quitar el prefijo UUID del nombre
+        const name = rawName.replace(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}_/i, "");
+
+        // Extraer carpeta de fecha de la ruta: {storagePath}/{DD-MM-YYYY}/{uuid}_archivo.zip
+        // pathParts[0] = storagePath, pathParts[1] = DD-MM-YYYY, pathParts[2] = archivo
+        const pathParts  = blob.name.split("/");
+        const dateFolder = pathParts.length >= 2 ? pathParts[1] : "—";
+
+        let tags: Record<string, string> | undefined;
+        try {
+          const blobClient = containerClient.getBlobClient(blob.name);
+          const tagsResult = await blobClient.getTags();
+          tags = tagsResult.tags;
+        } catch {
+          tags = undefined;
+        }
+
+        const defenderStatus = resolveDefenderStatus(tags);
+
+        // Leer metadata guardada al subir — fuente de verdad para hora y región
+        const uploadedAt  = blob.metadata?.["uploadedat"]  || blob.properties.lastModified?.toISOString() || "";
+        const tzFromMeta  = blob.metadata?.["timezone"]    || country.timezone;
+        const ccFromMeta  = blob.metadata?.["countrycode"] || country.code;
+
+        documents.push({
+          name,
+          path:         blob.name,
+          country:      ccFromMeta,
+          countryCode:  ccFromMeta,
+          countryName:  country.name,
+          timezone:     tzFromMeta,
+          dateFolder,
+          owner:        blob.metadata?.["uploader"] || "—",
+          status:       defenderStatus,
+          size:         formatSize(blob.properties.contentLength),
+          // uploadedAt del metadata = momento exacto de subida en UTC
+          // lastModified = fallback si es un blob antiguo sin metadata
+          lastModified: uploadedAt,
+        });
       }
-
-      const defenderStatus = resolveDefenderStatus(tags);
-
-      documents.push({
-        name,
-        path:         blob.name,
-        country:      "PERU",
-        countryName:  "Bluetab Solutions Peru",
-        owner:        blob.metadata?.["uploader"] || "—",
-        status:       defenderStatus,
-        size:         formatSize(blob.properties.contentLength),
-        lastModified: blob.properties.lastModified
-      });
     }
 
     // Más reciente primero
@@ -115,7 +144,7 @@ export async function getDocuments(
       new Date(b.lastModified).getTime() - new Date(a.lastModified).getTime()
     );
 
-    context.log(`GetDocuments: ${documents.length} archivos en ${containerName}/${PREFIX}`);
+    context.log(`GetDocuments: ${documents.length} archivos — regiones: ${countriesToQuery.map(c => c.code).join(", ")}`);
 
     return {
       status: 200,
@@ -123,7 +152,7 @@ export async function getDocuments(
       jsonBody: {
         total: documents.length,
         documents,
-        countries: COUNTRIES.map(c => ({ code: c.code, name: c.name }))
+        countries: countriesToQuery.map(c => ({ code: c.code, name: c.name }))
       }
     };
 

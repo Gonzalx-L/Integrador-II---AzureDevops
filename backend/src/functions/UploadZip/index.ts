@@ -86,17 +86,33 @@ export async function uploadZip(
     const fileBuffer = Buffer.from(arrayBuffer);
     const fileId = uuidv4();
     const fileName = `${fileId}_${file.name}`;
-    // Ruta fija según lineamiento: siempre MENSUALES/BLUETAB_PERU/
-    const blobPath = `MENSUALES/BLUETAB_PERU/${fileName}`;
+
+    // Ruta por fecha local del país: {storagePath}/DD-MM-YYYY/{archivo}
+    // Usamos la timezone del país para que la carpeta refleje el día local
+    const { DateTime } = await import("luxon");
+    const now         = DateTime.utc();
+    const localDate   = now.setZone(country.timezone);
+    const dateFolder  = localDate.toFormat("dd-MM-yyyy");
+    const uploadedAt  = now.toISO()!;          // ISO UTC — se guarda en metadata
+    const blobPath    = `${country.storagePath}/${dateFolder}/${fileName}`;
     const containerName = process.env["CONTAINER_TRANSFERENCIA"] || "transferencia-archivos";
 
-    // Subir a Blob Storage con metadata del uploader
+    // Subir a Blob Storage con metadata completa:
+    //   uploader   → nombre del usuario que subió
+    //   uploadedat → ISO UTC del momento exacto de subida
+    //   countrycode → código del país (para recuperarlo sin parsear la ruta)
+    //   timezone    → timezone del país (para que el frontend convierta la hora)
     await uploadBlob(
       "STORAGE_TRANSFERENCIA_CONNECTION",
       containerName,
       blobPath,
       fileBuffer,
-      { uploader }  // guardado en metadata del blob
+      {
+        uploader:    uploader,
+        uploadedat:  uploadedAt,
+        countrycode: countryCode,
+        timezone:    country.timezone,
+      }
     );
 
     context.log(`Archivo subido: ${blobPath}`);
@@ -108,7 +124,7 @@ export async function uploadZip(
       blobPath,
       countryCode,
       storagePath: country.storagePath,
-      uploadedAt: new Date().toISOString(),
+      uploadedAt,          // mismo ISO UTC que se guardó en metadata
       fileSize: fileBuffer.length,
       originalName: file.name
     };

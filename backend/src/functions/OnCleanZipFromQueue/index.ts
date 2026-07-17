@@ -6,6 +6,7 @@ interface CleanZipMessage {
   fileName: string;
   blobPath: string;
   countryCode: string;
+  storagePath: string;
   uploadedAt: string;
   fileSize: number;
   scanResult: string;
@@ -37,8 +38,15 @@ export async function onCleanZipFromQueue(
       message.blobPath
     );
 
-    // 1. Mover a DESBLOQUEADOS en el storage de transferencia
-    const desbloqueadosPath = `MENSUALES/${message.countryCode}/DESBLOQUEADOS/${message.fileName}`;
+    // Extraer la carpeta de fecha de la ruta original
+    // blobPath formato: {storagePath}/{DD-MM-YYYY}/{uuid}_archivo.zip
+    const pathParts   = message.blobPath.split("/");
+    const storagePath = pathParts[0];   // ej: BLUETAB_PERU
+    const dateFolder  = pathParts[1];   // ej: 13-07-2026
+
+    // 1. Mover a DESBLOQUEADOS dentro de la misma carpeta de fecha
+    //    {storagePath}/{DD-MM-YYYY}/DESBLOQUEADOS/{fileName}
+    const desbloqueadosPath = `${storagePath}/${dateFolder}/DESBLOQUEADOS/${message.fileName}`;
     await uploadBlob(
       "STORAGE_TRANSFERENCIA_CONNECTION",
       containerTransferencia,
@@ -47,8 +55,9 @@ export async function onCleanZipFromQueue(
     );
     context.log(`Archivo copiado a DESBLOQUEADOS: ${desbloqueadosPath}`);
 
-    // 2. Replicar en el storage de documentos final
-    const documentosPath = `${message.countryCode}/MENSUALES/${message.fileName}`;
+    // 2. Replicar en el storage de documentos final (misma estructura)
+    //    {storagePath}/{DD-MM-YYYY}/{fileName}
+    const documentosPath = `${storagePath}/${dateFolder}/${message.fileName}`;
     await uploadBlob(
       "STORAGE_DOCUMENTOS_CONNECTION",
       containerDocumentos,

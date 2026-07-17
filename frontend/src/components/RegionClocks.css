@@ -1,0 +1,144 @@
+/* ── REGION CLOCKS WRAPPER ─────────────────────────────── */
+.region-clocks-wrap {
+  margin-bottom: 24px;
+}
+
+.region-clocks-title {
+  font-size: 13px;
+  font-weight: 700;
+  color: #475569;
+  margin-bottom: 12px;
+  letter-spacing: 0.3px;
+}
+
+/* Grid responsivo: 1 reloj = centrado, 2 = 2 cols, 4 = 4 cols */
+.region-clocks-grid {
+  display: grid;
+  gap: 16px;
+}
+.clocks-1 { grid-template-columns: 200px; }
+.clocks-2 { grid-template-columns: repeat(2, 1fr); max-width: 440px; }
+.clocks-3 { grid-template-columns: repeat(3, 1fr); }
+.clocks-4 { grid-template-columns: repeat(4, 1fr); }
+
+/* ── CLOCK CARD ────────────────────────────────────────── */
+.clock-card {
+  background: #fff;
+  border-radius: 14px;
+  padding: 16px;
+  box-shadow: 0 1px 4px rgba(0,0,0,0.07);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  transition: box-shadow 0.2s;
+}
+.clock-card:hover {
+  box-shadow: 0 4px 16px rgba(30,58,95,0.1);
+}
+
+/* Header: bandera + nombre + fecha */
+.clock-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+}
+.clock-flag  { font-size: 22px; line-height: 1; }
+.clock-region { display: flex; flex-direction: column; }
+.clock-label { font-size: 13px; font-weight: 700; color: #1e293b; }
+.clock-date  { font-size: 11px; color: #94a3b8; text-transform: capitalize; }
+
+/* ── RELOJ ANALÓGICO ───────────────────────────────────── */
+.clock-face {
+  position: relative;
+  width: 90px;
+  height: 90px;
+  border-radius: 50%;
+  background: #f8fafc;
+  border: 2.5px solid #1e3a5f;
+  box-shadow: 0 2px 8px rgba(30,58,95,0.12), inset 0 1px 3px rgba(0,0,0,0.05);
+}
+
+/* Marcas de horas */
+.clock-mark {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 3px;
+  height: 8px;
+  background: #cbd5e1;
+  border-radius: 2px;
+  transform-origin: center bottom;
+  margin-left: -1.5px;
+}
+/* Cada 3 marcas (3,6,9,12) más gruesas */
+.clock-mark:nth-child(3n) {
+  background: #1e3a5f;
+  height: 10px;
+  width: 4px;
+}
+
+/* Agujas */
+.clock-hand {
+  position: absolute;
+  bottom: 50%;
+  left: 50%;
+  transform-origin: bottom center;
+  border-radius: 4px;
+}
+
+.hour-hand {
+  width: 4px;
+  height: 26px;
+  background: #1e3a5f;
+  margin-left: -2px;
+}
+
+.min-hand {
+  width: 3px;
+  height: 34px;
+  background: #334155;
+  margin-left: -1.5px;
+}
+
+.sec-hand {
+  width: 2px;
+  height: 38px;
+  background: #e91e63;
+  margin-left: -1px;
+}
+
+/* Punto central */
+.clock-center {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #1e3a5f;
+  transform: translate(-50%, -50%);
+  z-index: 1;
+  box-shadow: 0 0 0 2px #fff;
+}
+
+/* ── HORA DIGITAL ──────────────────────────────────────── */
+.clock-digital {
+  display: flex;
+  align-items: baseline;
+  gap: 3px;
+}
+.clock-hhmm {
+  font-size: 22px;
+  font-weight: 800;
+  color: #1e293b;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.5px;
+}
+.clock-ss {
+  font-size: 13px;
+  font-weight: 600;
+  color: #94a3b8;
+  font-variant-numeric: tabular-nums;
+}

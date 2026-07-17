@@ -2,18 +2,74 @@ import { useState, useEffect, useCallback } from "react";
 import { useMsal } from "@azure/msal-react";
 import axios from "axios";
 import jsPDF from "jspdf";
-import { API_BASE_URL } from "../authConfig";
+import {
+  API_BASE_URL,
+  getRolesFromAccount,
+  getAllowedRegions,
+  isAdminRole,
+  ROLE_LABELS,
+  type AppRole,
+} from "../authConfig";
 import PipelineDiagram from "../components/PipelineDiagram";
+import RegionClocks from "../components/RegionClocks";
 import "./DashboardPage.css";
 
 type Page = "inicio" | "subir" | "documentos" | "reportes";
 
 interface DocItem {
   name: string; path: string; country: string; countryName: string;
+  countryCode: string; timezone: string; dateFolder: string;
   // Estados reales de Azure Defender for Storage (malware scanning)
   status: "No threats found" | "Malicious" | "Suspicious" | "Scanning" | "Unscanned" | string;
-  size: string | number; lastModified: string;
+  size: string | number; lastModified: string; owner?: string;
 }
+
+/** Formatea un ISO timestamp en la timezone del país del archivo */
+function formatLocalDateTime(isoDate: string | Date | undefined, timezone: string) {
+  if (!isoDate) return { date: "—", time: "—", ampm: "", tzLabel: "" };
+  const d = typeof isoDate === "string" ? new Date(isoDate) : isoDate;
+  if (isNaN(d.getTime())) return { date: "—", time: "—", ampm: "", tzLabel: "" };
+
+  const tz = timezone || "UTC";
+
+  // Fecha local en la timezone del país
+  const date = new Intl.DateTimeFormat("es-PE", {
+    timeZone: tz,
+    day: "2-digit", month: "2-digit", year: "numeric",
+  }).format(d);
+
+  // Hora 24h en la timezone del país
+  const time = new Intl.DateTimeFormat("es-PE", {
+    timeZone: tz,
+    hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false,
+  }).format(d);
+
+  // AM/PM: extraer hora numérica y decidir
+  const hour24 = parseInt(
+    new Intl.DateTimeFormat("en-US", { timeZone: tz, hour: "2-digit", hour12: false }).format(d)
+  );
+  const ampm = hour24 < 12 ? "AM" : "PM";
+
+  // Abreviatura de timezone usando locale "en-US" para resultado consistente
+  // Resultado ejemplo: "7/13/2026, 11:40:10 PM GMT-5" → tomamos la parte tras el último espacio
+  const tzFull  = new Intl.DateTimeFormat("en-US", {
+    timeZone: tz, timeZoneName: "short",
+    year: "numeric", month: "numeric", day: "numeric",
+    hour: "numeric", minute: "numeric",
+  }).format(d);
+  // tzFull termina con " GMT-5" o "UTC" etc.
+  const tzLabel = tzFull.split(" ").pop() || tz;
+
+  return { date, time, ampm, tzLabel };
+}
+
+/** Chips de bandera + nombre corto de región */
+const REGION_CHIP: Record<string, { flag: string; label: string; color: string }> = {
+  PERU:          { flag: "🇵🇪", label: "Perú",          color: "#dc2626" },
+  ESPANA:        { flag: "🇪🇸", label: "España",         color: "#f59e0b" },
+  ARGENTINA:     { flag: "🇦🇷", label: "Argentina",      color: "#2563eb" },
+  NUEVA_ZELANDA: { flag: "🇳🇿", label: "Nueva Zelanda",  color: "#16a34a" },
+};
 
 const COLORS = ["#1e3a5f","#e91e63","#ff9800","#4caf50","#9c27b0","#00bcd4"];
 
@@ -45,9 +101,8 @@ function StatusPill({ s }: { s: string }) {
 }
 
 // ── SIDEBAR ──────────────────────────────────────────────
-function Sidebar({ page, setPage, user, onLogout, collapsed, setCollapsed }: any) {
+function Sidebar({ page, setPage, user, onLogout, collapsed, setCollapsed, isAdmin, roleLabel }: any) {
   const initials = (user?.name || "U").split(" ").map((w: string) => w[0]).slice(0,2).join("").toUpperCase();
-  const isAdmin = true; // se controla más abajo con roles
 
   const navItems: [Page, string, string, number?][] = isAdmin
     ? [["inicio","🏠","Inicio"],["subir","📤","Subir Archivo"],["documentos","📄","Documentos",15],["reportes","📊","Reportes"]]
@@ -72,7 +127,7 @@ function Sidebar({ page, setPage, user, onLogout, collapsed, setCollapsed }: any
         <div className="user-avatar">{initials}</div>
         <div className="user-info">
           <div className="user-name">{user?.name || "Usuario"}</div>
-          <div className="user-role">Colaborador Senior</div>
+          <div className="user-role">{roleLabel}</div>
         </div>
         <button className="btn-logout" onClick={onLogout} title="Cerrar sesión">↩</button>
       </div>
@@ -81,7 +136,7 @@ function Sidebar({ page, setPage, user, onLogout, collapsed, setCollapsed }: any
 }
 
 // ── TOPBAR ────────────────────────────────────────────────
-function Topbar({ section, user }: any) {
+function Topbar({ section, user, roleLabel }: any) {
   const initials = (user?.name || "U").split(" ").map((w: string) => w[0]).slice(0,2).join("").toUpperCase();
   return (
     <div className="topbar">
@@ -95,7 +150,7 @@ function Topbar({ section, user }: any) {
         <div className="topbar-avatar">{initials}</div>
         <div className="topbar-user-info">
           <div className="topbar-name">{(user?.name || "Usuario").split(" ")[0]}</div>
-          <div className="topbar-role">Colaborador Senior</div>
+          <div className="topbar-role">{roleLabel}</div>
         </div>
       </div>
     </div>
@@ -103,7 +158,7 @@ function Topbar({ section, user }: any) {
 }
 
 // ── INICIO ────────────────────────────────────────────────
-function InicioPage({ docs, onUpload, userName }: { docs: DocItem[]; onUpload: () => void; userName: string }) {
+function InicioPage({ docs, onUpload, userName, allowedRegions }: { docs: DocItem[]; onUpload: () => void; userName: string; allowedRegions: string[] }) {
   const nombre     = userName.split(" ")[0];
   const total      = docs.length || 24;
   const limpios    = docs.filter(d => d.status === "No threats found").length || 18;
@@ -123,6 +178,9 @@ function InicioPage({ docs, onUpload, userName }: { docs: DocItem[]; onUpload: (
         <h1>Bienvenido, {nombre} 👋</h1>
         <p>Panel de control — Bluetab Solutions</p>
       </div>
+
+      {/* Relojes por región */}
+      <RegionClocks allowedRegions={allowedRegions} />
 
       <div className="stats-grid" style={{gridTemplateColumns:"repeat(4,1fr)",gap:16,marginBottom:24}}>
         {stats.map((s,i) => (
@@ -157,12 +215,17 @@ function InicioPage({ docs, onUpload, userName }: { docs: DocItem[]; onUpload: (
 }
 
 // ── SUBIR ARCHIVO ─────────────────────────────────────────
-function SubirPage({ docs, countries, onUploaded, userName, isAdmin, userEmail }: any) {
+function SubirPage({ docs, countries, onUploaded, userName, isAdmin, userEmail, allowedRegions }: any) {
   const [file, setFile]       = useState<File|null>(null);
   const [country, setCountry] = useState("");
   const [msg, setMsg]         = useState("");
   const [isError, setIsError] = useState(false);
   const [uploading, setUploading] = useState(false);
+
+  // Filtrar países según las regiones del rol del token — directo, sin inferencias
+  const availableCountries = allowedRegions.length > 0
+    ? countries.filter((c: any) => allowedRegions.includes(c.code))
+    : countries;
 
   const submit = async () => {
     if (!file || !country) { setMsg("Selecciona un archivo ZIP y un país."); setIsError(true); return; }
@@ -182,11 +245,7 @@ function SubirPage({ docs, countries, onUploaded, userName, isAdmin, userEmail }
     } finally { setUploading(false); }
   };
 
-  const recent = docs.length > 0 ? docs.slice(0,5) : [
-    { name:"informe_abril_2025.zip",   date:"02 Abr 2025", size:"2.4 MB", status:"Unscanned" },
-    { name:"informe_marzo_2025.zip",   date:"01 Mar 2025", size:"1.8 MB", status:"No threats found" },
-    { name:"informe_febrero_2025.zip", date:"03 Feb 2025", size:"2.1 MB", status:"No threats found" },
-  ];
+  const recent = docs.slice(0, 5); // siempre datos reales del storage
 
   const nombre = (userName || "Usuario").split(" ")[0];
 
@@ -209,7 +268,7 @@ function SubirPage({ docs, countries, onUploaded, userName, isAdmin, userEmail }
             <select value={country} onChange={e=>setCountry(e.target.value)}
               style={{width:"100%",padding:"10px 12px",border:"1.5px solid #e2e8f0",borderRadius:8,fontSize:14,outline:"none",background:"#fff"}}>
               <option value="">Seleccionar país...</option>
-              {countries.map((c:any)=><option key={c.code} value={c.code}>{c.name}</option>)}
+              {availableCountries.map((c:any)=><option key={c.code} value={c.code}>{c.name}</option>)}
             </select>
           </div>
 
@@ -239,28 +298,56 @@ function SubirPage({ docs, countries, onUploaded, userName, isAdmin, userEmail }
           </button>
         </div>
 
-        {/* Columna derecha — historial */}
+        {/* Columna derecha — historial (solo para admins) */}
         {isAdmin && (
           <div className="upload-table-wrap" style={{height:"100%"}}>
             <div className="upload-table-header">
               <h3>Mis últimos archivos</h3>
               <span>{recent.length} registros</span>
             </div>
+            {recent.length === 0 ? (
+              <div style={{padding:"32px 24px",textAlign:"center",color:"#94a3b8"}}>
+                <div style={{fontSize:32,marginBottom:8}}>📂</div>
+                <div style={{fontSize:13}}>Aún no hay archivos subidos</div>
+              </div>
+            ) : (
             <table>
               <thead>
-                <tr><th>Archivo</th><th>Fecha</th><th>Tamaño</th><th>Estado</th></tr>
+                <tr><th>Archivo</th><th>Fecha</th><th>Hora</th><th>Región</th><th>Tamaño</th><th>Estado</th></tr>
               </thead>
               <tbody>
-                {(recent as any[]).map((d,i)=>(
-                  <tr key={i}>
-                    <td><div className="td-file">📄 {d.name}</div></td>
-                    <td>{d.date || (d.lastModified ? new Date(d.lastModified).toLocaleDateString("es-PE") : "—")}</td>
-                    <td>{d.size || "—"}</td>
-                    <td><StatusPill s={d.status} /></td>
-                  </tr>
-                ))}
+                {(recent as any[]).map((d,i) => {
+                  const tz   = d.timezone || country?.timezone || "UTC";
+                  const { date, time, ampm, tzLabel } = formatLocalDateTime(d.lastModified, tz);
+                  const chip = REGION_CHIP[d.country || d.countryCode || ""] || null;
+                  return (
+                    <tr key={i}>
+                      <td><div className="td-file">📄 {d.name}</div></td>
+                      <td>{date}</td>
+                      <td style={{fontVariantNumeric:"tabular-nums", whiteSpace:"nowrap"}}>
+                        <span style={{color:"#1e293b",fontSize:13,fontWeight:600}}>{time}</span>
+                        {" "}
+                        <span style={{fontSize:10,fontWeight:700,padding:"1px 5px",borderRadius:4,
+                          background:ampm==="AM"?"#dbeafe":"#fef3c7",
+                          color:ampm==="AM"?"#1d4ed8":"#92400e"}}>{ampm}</span>
+                        <span style={{fontSize:10,color:"#94a3b8",marginLeft:3}}>{tzLabel}</span>
+                      </td>
+                      <td>
+                        {chip
+                          ? <span style={{display:"inline-flex",alignItems:"center",gap:4,background:`${chip.color}18`,color:chip.color,borderRadius:6,padding:"2px 8px",fontSize:12,fontWeight:600}}>
+                              {chip.flag} {chip.label}
+                            </span>
+                          : <span style={{color:"#94a3b8",fontSize:12}}>—</span>
+                        }
+                      </td>
+                      <td>{d.size || "—"}</td>
+                      <td><StatusPill s={d.status} /></td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
+            )}
           </div>
         )}
       </div>
@@ -269,22 +356,19 @@ function SubirPage({ docs, countries, onUploaded, userName, isAdmin, userEmail }
 }
 
 // ── DOCUMENTOS ────────────────────────────────────────────
-function DocumentosPage({ docs, apiLoaded, apiError }: any) {
+function DocumentosPage({ docs, apiLoaded, apiError, allowedRegions }: any) {
   const [filter, setFilter] = useState("Todos");
   const [search, setSearch] = useState("");
   const [currentPage, setCurrentPage] = useState(1);
   const PER_PAGE = 6;
 
-  // Si la API ya respondió usamos sus datos (aunque sea array vacío).
-  // Solo mostramos fallback cuando la API nunca ha respondido todavía.
-  const rows = apiLoaded ? docs : [
-    { name:"informe_abril_2025.zip",    countryName:"Bluetab Solutions Peru",     date:"02 Abr 2025", size:"2.4 MB", status:"Unscanned" },
-    { name:"contrato_proveedor_Q1.zip", countryName:"Bluetab Solutions Espana",   date:"28 Mar 2025", size:"1.1 MB", status:"No threats found" },
-    { name:"politica_datos_v3.zip",     countryName:"Bluetab Solutions Argentina",date:"20 Mar 2025", size:"340 KB", status:"Scanning" },
-    { name:"informe_marzo_2025.zip",    countryName:"Bluetab Solutions Peru",     date:"01 Mar 2025", size:"1.8 MB", status:"No threats found" },
-    { name:"auditoria_IT_2025.zip",     countryName:"Bluetab Solutions Espana",   date:"15 Feb 2025", size:"980 KB", status:"Suspicious" },
-    { name:"informe_febrero_2025.zip",  countryName:"Bluetab Solutions Peru",     date:"03 Feb 2025", size:"2.1 MB", status:"Malicious" },
-  ];
+  // Datos siempre del storage vía API. Mientras carga, array vacío.
+  const allRows: any[] = apiLoaded ? docs : [];
+
+  // Filtrar por regiones permitidas según el rol
+  const rows = allowedRegions.length > 0
+    ? allRows.filter((r: any) => allowedRegions.includes(r.country || r.countryCode))
+    : allRows;
 
   const filtered = (rows as any[]).filter(r =>
     (filter === "Todos" || r.status === filter) &&
@@ -298,7 +382,7 @@ function DocumentosPage({ docs, apiLoaded, apiError }: any) {
     <div>
       <div className="page-header">
         <h1>Documentos</h1>
-        <p>Historial de archivos ZIP — sttransferenciaarchivos / MENSUALES/BLUETAB_PERU</p>
+        <p>Historial de archivos ZIP — hora y fecha en zona horaria de cada región</p>
       </div>
 
       {/* Banner de error si el backend falló */}
@@ -338,32 +422,53 @@ function DocumentosPage({ docs, apiLoaded, apiError }: any) {
         {rows.length === 0 && apiLoaded && !apiError ? (
           <div style={{padding:"48px 24px",textAlign:"center",color:"#94a3b8"}}>
             <div style={{fontSize:40,marginBottom:12}}>📂</div>
-            <div style={{fontSize:15,fontWeight:600,color:"#475569"}}>No hay archivos en MENSUALES/BLUETAB_PERU</div>
+            <div style={{fontSize:15,fontWeight:600,color:"#475569"}}>No hay archivos en tu región</div>
             <div style={{fontSize:13,marginTop:6}}>Sube tu primer archivo ZIP desde la sección "Subir Archivo"</div>
           </div>
         ) : (
         <table>
           <thead>
-            <tr><th>#</th><th>Nombre del archivo</th><th>Propietario</th><th>Fecha</th><th>Tamaño</th><th>Estado</th></tr>
+            <tr><th>#</th><th>Nombre del archivo</th><th>Región</th><th>Propietario</th><th>Fecha</th><th>Hora</th><th>Tamaño</th><th>Estado</th></tr>
           </thead>
           <tbody>
-            {paginated.map((d,i)=>(
-              <tr key={i}>
-                <td style={{color:"#94a3b8"}}>{(currentPage-1)*PER_PAGE+i+1}</td>
-                <td><div className="td-file">📄 {d.name}</div></td>
-                <td>
-                  <div style={{display:"flex",alignItems:"center",gap:6}}>
-                    <span className="owner-chip" style={{background:d.color||COLORS[i%COLORS.length]}}>
-                      {(d.owner||d.countryName||"?").charAt(0)}
-                    </span>
-                    {d.owner || d.countryName}
-                  </div>
-                </td>
-                <td>{d.date||(d.lastModified?new Date(d.lastModified).toLocaleDateString("es-PE"):"—")}</td>
-                <td>{d.size||"—"}</td>
-                <td><StatusPill s={d.status} /></td>
-              </tr>
-            ))}
+            {paginated.map((d,i)=>{
+              const tz   = d.timezone || "UTC";
+              const { date, time, ampm, tzLabel } = formatLocalDateTime(d.lastModified, tz);
+              const chip = REGION_CHIP[d.country || d.countryCode || ""] || null;
+              return (
+                <tr key={i}>
+                  <td style={{color:"#94a3b8"}}>{(currentPage-1)*PER_PAGE+i+1}</td>
+                  <td><div className="td-file">📄 {d.name}</div></td>
+                  <td>
+                    {chip
+                      ? <span style={{display:"inline-flex",alignItems:"center",gap:4,background:`${chip.color}18`,color:chip.color,borderRadius:6,padding:"2px 8px",fontSize:12,fontWeight:600}}>
+                          {chip.flag} {chip.label}
+                        </span>
+                      : <span style={{color:"#94a3b8",fontSize:12}}>{d.countryName || "—"}</span>
+                    }
+                  </td>
+                  <td>
+                    <div style={{display:"flex",alignItems:"center",gap:6}}>
+                      <span className="owner-chip" style={{background:d.color||COLORS[i%COLORS.length]}}>
+                        {(d.owner||d.countryName||"?").charAt(0)}
+                      </span>
+                      {d.owner || d.countryName}
+                    </div>
+                  </td>
+                  <td>{date}</td>
+                  <td style={{fontVariantNumeric:"tabular-nums", whiteSpace:"nowrap"}}>
+                    <span style={{color:"#1e293b",fontSize:13,fontWeight:600}}>{time}</span>
+                    {" "}
+                    <span style={{fontSize:10,fontWeight:700,padding:"1px 5px",borderRadius:4,
+                      background:ampm==="AM"?"#dbeafe":"#fef3c7",
+                      color:ampm==="AM"?"#1d4ed8":"#92400e"}}>{ampm}</span>
+                    <span style={{fontSize:10,color:"#94a3b8",marginLeft:3}}>{tzLabel}</span>
+                  </td>
+                  <td>{d.size||"—"}</td>
+                  <td><StatusPill s={d.status} /></td>
+                </tr>
+              );
+            })}
           </tbody>
         </table>
         )}
@@ -707,12 +812,33 @@ export default function DashboardPage() {
   const [apiError, setApiError]   = useState<string>("");
   const [apiLoaded, setApiLoaded] = useState(false);
 
-  // Rol: en producción se lee del token de Azure AD
-  const isAdmin = true; // simplificado hasta implementar roles en Azure AD
+  // ── ROLES desde el id_token de Azure AD ──────────────────
+  const roles: AppRole[]        = getRolesFromAccount(user);
+  const isAdmin: boolean        = isAdminRole(roles);
+  const allowedRegions: string[] = getAllowedRegions(roles);
+
+  // Etiqueta de rol para la UI: muestra el rol más relevante
+  const roleLabel: string = roles.length > 0
+    ? ROLE_LABELS[
+        roles.includes("AdminGlobal")      ? "AdminGlobal"      :
+        roles.find(r => r.startsWith("Admin")) ??
+        roles.find(r => r.startsWith("Upload")) ??
+        roles[0]
+      ] ?? "Sin rol"
+    : "Sin rol asignado";
+
+  // Si es UploadUser redirigir a "subir" por defecto
+  useEffect(() => {
+    if (!isAdmin && page !== "subir") setPage("subir");
+  }, [isAdmin]);
 
   const fetchDocs = useCallback(async () => {
     try {
-      const r = await axios.get(`${API_BASE_URL}/documents`);
+      // Pasar las regiones permitidas como query param para que el backend filtre
+      const regionParam = allowedRegions.length > 0
+        ? `?regions=${allowedRegions.join(",")}`
+        : "";
+      const r = await axios.get(`${API_BASE_URL}/documents${regionParam}`);
       setDocs(r.data.documents || []);
       setCountries(r.data.countries || []);
       setApiError("");
@@ -721,13 +847,7 @@ export default function DashboardPage() {
       setApiError(e?.response?.data?.error || e?.message || "Error desconocido");
       setApiLoaded(true);
     }
-  }, []);
-
-  useEffect(() => {
-    fetchDocs();
-    const t = setInterval(fetchDocs, 15000);
-    return () => clearInterval(t);
-  }, [fetchDocs]);
+  }, [allowedRegions.join(",")]);
 
   useEffect(() => {
     fetchDocs();
@@ -745,13 +865,14 @@ export default function DashboardPage() {
         page={page} setPage={setPage} user={user}
         onLogout={() => instance.logoutPopup()}
         collapsed={collapsed} setCollapsed={setCollapsed}
+        isAdmin={isAdmin} roleLabel={roleLabel}
       />
       <div className={`dash-main${collapsed?" collapsed":""}`}>
-        <Topbar section={sections[page]} user={user} />
+        <Topbar section={sections[page]} user={user} roleLabel={roleLabel} />
         <div className="content">
-          {page==="inicio"     && <InicioPage     docs={docs} onUpload={()=>setPage("subir")} userName={user?.name||"Usuario"} />}
-          {page==="subir"      && <SubirPage      docs={docs} countries={countries} onUploaded={fetchDocs} userName={user?.name||"Usuario"} userEmail={user?.username||""} isAdmin={isAdmin} />}
-          {page==="documentos" && isAdmin && <DocumentosPage docs={docs} apiLoaded={apiLoaded} apiError={apiError} />}
+          {page==="inicio"     && isAdmin && <InicioPage docs={docs} onUpload={()=>setPage("subir")} userName={user?.name||"Usuario"} allowedRegions={allowedRegions} />}
+          {page==="subir"      && <SubirPage docs={docs} countries={countries} onUploaded={fetchDocs} userName={user?.name||"Usuario"} userEmail={user?.username||""} isAdmin={isAdmin} allowedRegions={allowedRegions} />}
+          {page==="documentos" && isAdmin && <DocumentosPage docs={docs} apiLoaded={apiLoaded} apiError={apiError} allowedRegions={allowedRegions} />}
           {page==="reportes"   && isAdmin && <ReportesPage />}
         </div>
       </div>

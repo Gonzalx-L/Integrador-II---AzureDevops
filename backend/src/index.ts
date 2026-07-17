@@ -5,7 +5,8 @@
 import "./functions/CompanyJobScheduler/index";
 import "./functions/DurableExecutionsOrchestrator/index";
 import "./functions/DurableExecutions/index";
-import "./functions/OnDefenderScanResultQueue/index";
+import "./functions/OnDefenderScanResultQueue/index";   // mock — activo en dev con DEFENDER_MOCK=true
+import "./functions/OnDefenderEventGrid/index";          // real — activo en prod con Azure Defender
 import "./functions/OnCleanZipFromQueue/index";
 import "./functions/OnProtecedZipFromQueue/index";
 import "./functions/OnErrorZipFromQueue/index";

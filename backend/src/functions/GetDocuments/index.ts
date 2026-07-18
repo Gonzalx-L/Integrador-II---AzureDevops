@@ -20,15 +20,55 @@ type DefenderStatus =
   | "Unscanned";
 
 /**
- * Lee el tag "Malware Scanning Result" que Defender escribe en el blob.
- * Si no existe (Defender no habilitado o blob muy reciente) → "Unscanned".
+ * Nombres de archivo que simulan ser maliciosos en modo DEFENDER_MOCK.
+ * Case-insensitive, se compara contra el nombre limpio sin UUID.
+ */
+const MOCK_MALICIOUS_NAMES = ["pruebaantony", "reportegonzalo", "ventas123"];
+
+/**
+ * Resuelve el estado de Defender para un blob.
+ *
+ * Modo real  (DEFENDER_MOCK !== "true"):
+ *   Lee el tag "Malware Scanning Result" del blob. Si no existe → "Unscanned".
+ *
+ * Modo mock (DEFENDER_MOCK === "true"):
+ *   Simula el comportamiento de Defender basado en el tiempo transcurrido:
+ *   - Si subió hace menos de DEFENDER_MOCK_DELAY segundos → "Unscanned"
+ *   - Si subió hace más del delay:
+ *       · Nombre contiene PruebaAntony/ReporteGonzalo/Ventas123 → "Malicious"
+ *       · Cualquier otro → "No threats found"
  */
 function resolveDefenderStatus(
-  tags: Record<string, string> | undefined
+  tags:        Record<string, string> | undefined,
+  uploadedAt:  string,
+  blobName:    string
 ): DefenderStatus {
-  const result = tags?.["Malware Scanning Result"];
-  if (result) return result as DefenderStatus;
-  return "Unscanned";
+  // Modo real — leer el tag
+  if (process.env["DEFENDER_MOCK"] !== "true") {
+    const result = tags?.["Malware Scanning Result"];
+    return result ? (result as DefenderStatus) : "Unscanned";
+  }
+
+  // Modo mock — simular con lógica temporal
+  const delaySeconds = parseInt(process.env["DEFENDER_MOCK_DELAY"] || "10");
+  const uploadedMs   = uploadedAt ? new Date(uploadedAt).getTime() : 0;
+  const elapsedSec   = uploadedMs > 0
+    ? (Date.now() - uploadedMs) / 1000
+    : delaySeconds + 1; // si no hay fecha, asumir ya escaneado
+
+  if (elapsedSec < delaySeconds) {
+    return "Unscanned";
+  }
+
+  // Pasado el delay: verificar si el nombre es de los maliciosos
+  const rawName   = blobName.split("/").pop() ?? "";
+  const cleanName = rawName
+    .replace(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}_/i, "")
+    .replace(/\.zip$/i, "")
+    .toLowerCase();
+
+  const isMalicious = MOCK_MALICIOUS_NAMES.some(n => cleanName.includes(n));
+  return isMalicious ? "Malicious" : "No threats found";
 }
 
 /**
@@ -84,8 +124,6 @@ export async function getDocuments(
 
     // Iterar sobre cada país permitido
     for (const country of countriesToQuery) {
-      // Prefijo raíz de la región — busca en MENSUALES/{storagePath}/ (ruta legacy)
-      // y también en {storagePath}/ (ruta nueva por fecha)
       const PREFIXES = [
         `MENSUALES/${country.storagePath}/`,
         `${country.storagePath}/`,
@@ -99,13 +137,15 @@ export async function getDocuments(
         const rawName = blob.name.split("/").pop() ?? "";
         if (!rawName.toLowerCase().endsWith(".zip")) continue;
 
-        // Ignorar subcarpeta DESBLOQUEADOS — solo mostrar archivos originales subidos
+        // Ignorar subcarpeta DESBLOQUEADOS
         if (blob.name.includes("/DESBLOQUEADOS/")) continue;
 
-        // Quitar el prefijo UUID del nombre
-        const name = rawName.replace(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}_/i, "");
+        // Ignorar archivos en ERROR — se muestran por su entrada en MENSUALES/ERROR/
+        // pero NO queremos el duplicado del original en BLUETAB_*/fecha/
+        // Regla: si existe una copia en MENSUALES/ (procesado), el original se omite.
+        // Lo resolvemos con deduplicación por nombre limpio al final.
 
-        // Extraer carpeta de fecha de la ruta: {storagePath}/{DD-MM-YYYY}/{uuid}_archivo.zip
+        const name = rawName.replace(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}_/i, "");
         const pathParts  = blob.name.split("/");
         const dateFolder = pathParts.length >= 2 ? pathParts[1] : "—";
 
@@ -118,12 +158,15 @@ export async function getDocuments(
           tags = undefined;
         }
 
-        const defenderStatus = resolveDefenderStatus(tags);
+        const uploadedAt = blob.metadata?.["uploadedat"] || blob.properties.lastModified?.toISOString() || "";
+        const tzFromMeta = blob.metadata?.["timezone"]   || country.timezone;
+        const ccFromMeta = blob.metadata?.["countrycode"]|| country.code;
 
-        // Leer metadata guardada al subir — fuente de verdad para hora y región
-        const uploadedAt  = blob.metadata?.["uploadedat"]  || blob.properties.lastModified?.toISOString() || "";
-        const tzFromMeta  = blob.metadata?.["timezone"]    || country.timezone;
-        const ccFromMeta  = blob.metadata?.["countrycode"] || country.code;
+        const defenderStatus = resolveDefenderStatus(tags, uploadedAt, blob.name);
+
+        // Marcar si es la copia "final" (ya procesada en MENSUALES/)
+        // vs el original recién subido (en BLUETAB_*/fecha/)
+        const isFinalCopy = blob.name.startsWith("MENSUALES/");
 
         documents.push({
           name,
@@ -131,30 +174,43 @@ export async function getDocuments(
           country:      ccFromMeta,
           countryCode:  ccFromMeta,
           countryName:  country.name,
-          timezone:     tzFromMeta,   // siempre presente: del metadata o del config del país
+          timezone:     tzFromMeta,
           dateFolder,
           owner:        blob.metadata?.["uploader"] || "—",
           status:       defenderStatus,
           size:         formatSize(blob.properties.contentLength),
           lastModified: uploadedAt,
+          isFinalCopy,  // usado para deduplicar abajo
         });
       }
       } // fin for PREFIXES
     } // fin for countriesToQuery
 
-    // Más reciente primero
-    documents.sort((a, b) =>
+    // ── Deduplicación ────────────────────────────────────────────────────
+    // Si un archivo tiene versión en MENSUALES/ (isFinalCopy=true),
+    // eliminar el duplicado del prefijo original (isFinalCopy=false).
+    const finalNames = new Set(
+      documents.filter(d => d.isFinalCopy).map(d => d.name.toLowerCase())
+    );
+    const deduplicated = documents.filter(d =>
+      d.isFinalCopy || !finalNames.has(d.name.toLowerCase())
+    );
+    // Quitar el campo auxiliar antes de responder
+    deduplicated.forEach(d => delete d.isFinalCopy);
+
+    // Ordenar por fecha descendente (más recientes primero)
+    deduplicated.sort((a, b) =>
       new Date(b.lastModified).getTime() - new Date(a.lastModified).getTime()
     );
 
-    context.log(`GetDocuments: ${documents.length} archivos — regiones: ${countriesToQuery.map(c => c.code).join(", ")}`);
+    context.log(`GetDocuments: ${deduplicated.length} archivos (${documents.length} total antes de deduplicar) — regiones: ${countriesToQuery.map(c => c.code).join(", ")}`);
 
     return {
       status: 200,
       headers: corsHeaders,
       jsonBody: {
-        total: documents.length,
-        documents,
+        total: deduplicated.length,
+        documents: deduplicated,
         countries: countriesToQuery.map(c => ({ code: c.code, name: c.name }))
       }
     };

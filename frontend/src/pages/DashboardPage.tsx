@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+﻿import { useState, useEffect, useCallback } from "react";
 import { useMsal } from "@azure/msal-react";
 import axios from "axios";
 import jsPDF from "jspdf";
@@ -675,245 +675,149 @@ function DocumentosPage({ docs, apiLoaded, apiError, allowedRegions }: any) {
 }
 
 // ── REPORTES ──────────────────────────────────────────────
-function ReportesPage() {
-  const months = ["Nov","Dic","Ene","Feb","Mar","Abr"];
-  const bars   = [1,8,2,1,0,3];
-  const maxBar = Math.max(...bars);
-  const threats= [
-    { label:"Troyano",         color:"#ef4444", pct:45, count:"4 archivos" },
-    { label:"PUA / Adware",    color:"#f59e0b", pct:22, count:"2 archivos" },
-    { label:"Macro maliciosa", color:"#8b5cf6", pct:22, count:"2 archivos" },
-    { label:"Ransomware",      color:"#ec4899", pct:11, count:"1 archivo"  },
-  ];
-  const history= [
-    { file:"informe_abril_2025.zip",  col:"C. Mendoza", date:"02 Abr 2025", threat:"Trojan.GenericKD 71825102", cat:"Troyano", sev:"Alta",  action:"Cuarentena" },
-    { file:"informe_enero_2025.zip",  col:"C. Mendoza", date:"02 Ene 2025", threat:"Trojan.GenericKD 69021445", cat:"Troyano", sev:"Alta",  action:"Cuarentena" },
-  ];
-  const stats= [
-    { icon:"📄", num:87,   label:"Total analizados",    sub:"Todos los archivos" },
-    { icon:"🔒", num:9,    label:"Amenazas detectadas", sub:"Histórico total" },
-    { icon:"📊", num:"10%",label:"Tasa de infección",   sub:"Del total subido" },
-    { icon:"✅", num:78,   label:"Archivos limpios",    sub:"Sin amenazas" },
+function ReportesPage({ docs }: { docs: DocItem[] }) {
+
+  // ── Calcular stats reales desde los docs del storage ──
+  const total      = docs.length;
+  const limpios    = docs.filter(d => d.status === "No threats found").length;
+  const maliciosos = docs.filter(d => d.status === "Malicious").length;
+  const sospechosos= docs.filter(d => d.status === "Suspicious").length;
+  const sinEsc     = docs.filter(d => d.status === "Unscanned").length;
+  const amenazas   = maliciosos + sospechosos;
+  const tasaInfec  = total > 0 ? Math.round((amenazas / total) * 100) : 0;
+
+  // ── Archivos maliciosos para el historial ──
+  const historial = docs
+    .filter(d => d.status === "Malicious" || d.status === "Suspicious")
+    .slice(0, 20);
+
+  // ── Detecciones por mes (últimos 6 meses) ──
+  const now = new Date();
+  const monthLabels: string[] = [];
+  const monthCounts: number[] = [];
+  for (let i = 5; i >= 0; i--) {
+    const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+    monthLabels.push(d.toLocaleDateString("es-PE", { month: "short" }));
+    const mn = d.getMonth(); const yr = d.getFullYear();
+    monthCounts.push(
+      docs.filter(doc => {
+        if (doc.status !== "Malicious" && doc.status !== "Suspicious") return false;
+        const dd = new Date(doc.lastModified);
+        return dd.getMonth() === mn && dd.getFullYear() === yr;
+      }).length
+    );
+  }
+  const maxBar = Math.max(...monthCounts, 1);
+
+  // ── Tipos de amenaza (solo Malicious vs Suspicious) ──
+  const threats = [
+    { label: "Malicioso",    color: "#ef4444", count: maliciosos,  pct: amenazas > 0 ? Math.round(maliciosos  / amenazas * 100) : 0 },
+    { label: "Sospechoso",   color: "#f59e0b", count: sospechosos, pct: amenazas > 0 ? Math.round(sospechosos / amenazas * 100) : 0 },
+  ].filter(t => t.count > 0);
+
+  const stats = [
+    { icon:"📄", num: total,           label:"Total analizados",    sub:"Todos los archivos",   color:"blue"   },
+    { icon:"🔒", num: amenazas,        label:"Amenazas detectadas", sub:"Malicioso + Sospechoso",color:"red"   },
+    { icon:"📊", num: `${tasaInfec}%`, label:"Tasa de infección",   sub:"Del total subido",     color:"orange" },
+    { icon:"✅", num: limpios,         label:"Archivos limpios",    sub:"Sin amenazas",          color:"green"  },
   ];
 
+  // ── Exportar PDF con datos reales ──
   const exportPDF = () => {
-    const doc = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
-    const W = 210; // ancho A4
-    const now = new Date();
-    const dateStr = now.toLocaleDateString("es-PE", { year:"numeric", month:"long", day:"numeric" });
-    const timeStr = now.toLocaleTimeString("es-PE", { hour:"2-digit", minute:"2-digit" });
-    const generated = `${dateStr} — ${timeStr}`;
+    const doc  = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
+    const W    = 210;
+    const nowD = new Date();
+    const generated = `${nowD.toLocaleDateString("es-PE",{year:"numeric",month:"long",day:"numeric"})} — ${nowD.toLocaleTimeString("es-PE",{hour:"2-digit",minute:"2-digit"})}`;
 
-    // ── NAVBAR / HEADER ──────────────────────────────────
-    // Barra azul superior
-    doc.setFillColor(30, 58, 95);
-    doc.rect(0, 0, W, 28, "F");
-
-    // ── Logo Bluetab recreado con texto ──
-    // "/" en azul oscuro
-    doc.setTextColor(58, 54, 153);
-    doc.setFontSize(20);
-    doc.setFont("helvetica", "bold");
-    doc.text("/", 11, 19);
-
-    // "blue" en gradiente azul-morado (simulado con azul)
-    doc.setTextColor(80, 60, 180);
-    doc.setFontSize(18);
-    doc.text("blue", 16, 19);
-
-    // "tab" en naranja-rojo
-    doc.setTextColor(210, 70, 30);
-    doc.text("tab", 34, 19);
-
-    // "an IBM Company" pequeño
-    doc.setFontSize(6);
-    doc.setFont("helvetica", "normal");
-    doc.setTextColor(200, 200, 200);
-    doc.text("an IBM Company", 11, 23);
-
-    // Título del reporte — derecha
-    doc.setFontSize(13);
-    doc.setFont("helvetica", "bold");
-    doc.setTextColor(255, 255, 255);
-    doc.text("DocuColab — Reporte de Seguridad", W - 10, 13, { align: "right" });
-    doc.setFontSize(8);
-    doc.setFont("helvetica", "normal");
-    doc.text("Azure Defender · Análisis de Amenazas · Bluetab Solutions Perú", W - 10, 19, { align: "right" });
-
-    // Línea separadora bajo el header
-    doc.setDrawColor(30, 58, 95);
-    doc.setLineWidth(0.5);
-    doc.line(10, 32, W - 10, 32);
-
-    // Fecha de generación
-    doc.setFontSize(8);
-    doc.setTextColor(100, 116, 139);
-    doc.setFont("helvetica", "italic");
-    doc.text(`Generado el: ${generated}`, 10, 37);
-    doc.text("Clasificación: Uso interno", W - 10, 37, { align: "right" });
+    // Header
+    doc.setFillColor(30,58,95); doc.rect(0,0,W,28,"F");
+    doc.setTextColor(80,60,180); doc.setFontSize(20); doc.setFont("helvetica","bold"); doc.text("/",11,19);
+    doc.setTextColor(80,60,180); doc.setFontSize(18); doc.text("blue",16,19);
+    doc.setTextColor(210,70,30); doc.text("tab",34,19);
+    doc.setFontSize(6); doc.setFont("helvetica","normal"); doc.setTextColor(200,200,200); doc.text("an IBM Company",11,23);
+    doc.setFontSize(13); doc.setFont("helvetica","bold"); doc.setTextColor(255,255,255);
+    doc.text("DocuColab — Reporte de Seguridad",W-10,13,{align:"right"});
+    doc.setFontSize(8); doc.setFont("helvetica","normal");
+    doc.text("Azure Defender · Análisis de Amenazas · Bluetab Solutions",W-10,19,{align:"right"});
+    doc.setDrawColor(30,58,95); doc.setLineWidth(0.5); doc.line(10,32,W-10,32);
+    doc.setFontSize(8); doc.setTextColor(100,116,139); doc.setFont("helvetica","italic");
+    doc.text(`Generado el: ${generated}`,10,37);
+    doc.text("Clasificación: Uso interno",W-10,37,{align:"right"});
 
     let y = 45;
+    // Sección 1: Stats
+    doc.setFillColor(241,245,249); doc.rect(10,y,W-20,7,"F");
+    doc.setTextColor(30,58,95); doc.setFontSize(10); doc.setFont("helvetica","bold");
+    doc.text("1. RESUMEN EJECUTIVO",13,y+5); y+=12;
+    const bw = (W-20)/4;
+    const sc: [number,number,number][] = [[219,234,254],[254,226,226],[255,251,235],[220,252,231]];
+    const sb: [number,number,number][] = [[59,130,246],[220,38,38],[234,179,8],[22,163,74]];
+    stats.forEach((s,i)=>{
+      const bx=10+i*bw;
+      doc.setFillColor(...sc[i]); doc.roundedRect(bx,y,bw-2,20,2,2,"F");
+      doc.setDrawColor(...sb[i]); doc.setLineWidth(0.8); doc.line(bx,y,bx,y+20);
+      doc.setTextColor(30,41,59); doc.setFontSize(14); doc.setFont("helvetica","bold");
+      doc.text(String(s.num),bx+bw/2-1,y+10,{align:"center"});
+      doc.setFontSize(7); doc.setFont("helvetica","normal"); doc.setTextColor(100,116,139);
+      doc.text(s.label,bx+bw/2-1,y+16,{align:"center"});
+    }); y+=26;
 
-    // ── SECCIÓN 1: RESUMEN EJECUTIVO ─────────────────────
-    doc.setFillColor(241, 245, 249);
-    doc.rect(10, y, W - 20, 7, "F");
-    doc.setTextColor(30, 58, 95);
-    doc.setFontSize(10);
-    doc.setFont("helvetica", "bold");
-    doc.text("1. RESUMEN EJECUTIVO", 13, y + 5);
-    y += 12;
+    // Sección 2: Detecciones por mes
+    doc.setFillColor(241,245,249); doc.rect(10,y,W-20,7,"F");
+    doc.setTextColor(30,58,95); doc.setFontSize(10); doc.setFont("helvetica","bold");
+    doc.text("2. DETECCIONES POR MES",13,y+5); y+=12;
+    const rL=(n:number)=>n===0?"Sin riesgo":n<=2?"Bajo":n<=5?"Medio":"Alto";
+    const rC=(n:number):[number,number,number]=>n===0?[22,163,74]:n<=2?[234,179,8]:n<=5?[249,115,22]:[220,38,38];
+    doc.setFillColor(30,58,95); doc.rect(10,y,W-24,7,"F");
+    doc.setTextColor(255,255,255); doc.setFontSize(8); doc.setFont("helvetica","bold");
+    doc.text("Mes",13,y+5); doc.text("Detectados",43,y+5); doc.text("Nivel",83,y+5); y+=7;
+    monthLabels.forEach((m,i)=>{
+      doc.setFillColor(i%2===0?248:255,i%2===0?250:255,i%2===0?252:255);
+      doc.rect(10,y,W-24,7,"F");
+      doc.setTextColor(51,65,85); doc.setFont("helvetica","normal"); doc.setFontSize(8);
+      doc.text(m,13,y+5); doc.text(String(monthCounts[i]),43,y+5);
+      const [r2,g2,b2]=rC(monthCounts[i]);
+      doc.setFillColor(r2,g2,b2); doc.roundedRect(80,y+1.5,28,4,1,1,"F");
+      doc.setTextColor(255,255,255); doc.setFontSize(7);
+      doc.text(rL(monthCounts[i]),94,y+5,{align:"center"}); y+=7;
+    }); y+=6;
 
-    // 4 stats en fila
-    const statBoxW = (W - 20) / 4;
-    const statColors: [number,number,number][] = [[219,234,254],[220,252,231],[254,226,226],[255,251,235]];
-    const statBorderColors: [number,number,number][] = [[59,130,246],[22,163,74],[220,38,38],[234,179,8]];
-
-    stats.forEach((s, i) => {
-      const bx = 10 + i * statBoxW;
-      doc.setFillColor(...statColors[i]);
-      doc.roundedRect(bx, y, statBoxW - 2, 20, 2, 2, "F");
-      doc.setDrawColor(...statBorderColors[i]);
-      doc.setLineWidth(0.8);
-      doc.line(bx, y, bx, y + 20); // borde izquierdo coloreado
-      doc.setTextColor(30, 41, 59);
-      doc.setFontSize(14);
-      doc.setFont("helvetica", "bold");
-      doc.text(String(s.num), bx + statBoxW/2 - 1, y + 10, { align: "center" });
-      doc.setFontSize(7);
-      doc.setFont("helvetica", "normal");
-      doc.setTextColor(100, 116, 139);
-      doc.text(s.label, bx + statBoxW/2 - 1, y + 16, { align: "center" });
-    });
-    y += 26;
-
-    // ── SECCIÓN 2: DETECCIONES POR MES ───────────────────
-    doc.setFillColor(241, 245, 249);
-    doc.rect(10, y, W - 20, 7, "F");
-    doc.setTextColor(30, 58, 95);
-    doc.setFontSize(10);
-    doc.setFont("helvetica", "bold");
-    doc.text("2. DETECCIONES POR MES", 13, y + 5);
-    y += 12;
-
-    // Tabla de detecciones
-    const tHeaders = ["Mes", "Detecciones", "Nivel de riesgo"];
-    const colW = [30, 40, 60];
-    const riskLabel = (n: number) => n === 0 ? "Sin riesgo" : n <= 2 ? "Bajo" : n <= 5 ? "Medio" : "Alto";
-    const riskColor = (n: number): [number,number,number] => n === 0 ? [22,163,74] : n <= 2 ? [234,179,8] : n <= 5 ? [249,115,22] : [220,38,38];
-
-    // Header tabla
-    doc.setFillColor(30, 58, 95);
-    doc.rect(10, y, colW[0]+colW[1]+colW[2]+6, 7, "F");
-    doc.setTextColor(255,255,255);
-    doc.setFontSize(8);
-    doc.setFont("helvetica", "bold");
-    let cx = 13;
-    tHeaders.forEach((h,i) => { doc.text(h, cx, y+5); cx += colW[i]; });
-    y += 7;
-
-    months.forEach((m, i) => {
-      doc.setFillColor(i%2===0 ? 248 : 255, i%2===0 ? 250 : 255, i%2===0 ? 252 : 255);
-      doc.rect(10, y, colW[0]+colW[1]+colW[2]+6, 7, "F");
-      doc.setTextColor(51, 65, 85);
-      doc.setFont("helvetica", "normal");
-      doc.setFontSize(8);
-      cx = 13;
-      doc.text(m, cx, y+5); cx += colW[0];
-      doc.text(String(bars[i]), cx, y+5); cx += colW[1];
-      // Pill de riesgo
-      const [r,g,b] = riskColor(bars[i]);
-      doc.setFillColor(r,g,b);
-      doc.roundedRect(cx, y+1.5, 28, 4, 1, 1, "F");
-      doc.setTextColor(255,255,255);
-      doc.setFontSize(7);
-      doc.text(riskLabel(bars[i]), cx+14, y+5, { align:"center" });
-      y += 7;
-    });
-    y += 6;
-
-    // ── SECCIÓN 3: TIPOS DE AMENAZA ───────────────────────
-    doc.setFillColor(241, 245, 249);
-    doc.rect(10, y, W - 20, 7, "F");
-    doc.setTextColor(30, 58, 95);
-    doc.setFontSize(10);
-    doc.setFont("helvetica", "bold");
-    doc.text("3. CLASIFICACIÓN DE AMENAZAS", 13, y + 5);
-    y += 12;
-
-    threats.forEach((t) => {
-      doc.setTextColor(51, 65, 85);
-      doc.setFontSize(8);
-      doc.setFont("helvetica", "normal");
-      // Punto de color
-      const [r,g,b] = t.color === "#ef4444" ? [239,68,68] : t.color === "#f59e0b" ? [245,158,11] : t.color === "#8b5cf6" ? [139,92,246] : [236,72,153];
-      doc.setFillColor(r,g,b);
-      doc.circle(15, y+2, 2, "F");
-      doc.text(t.label, 20, y+4);
-      // Barra de progreso
-      doc.setFillColor(226,232,240);
-      doc.rect(70, y, 80, 5, "F");
-      doc.setFillColor(r,g,b);
-      doc.rect(70, y, 80*(t.pct/100), 5, "F");
-      doc.setTextColor(100,116,139);
-      doc.text(`${t.pct}% — ${t.count}`, 155, y+4);
-      y += 9;
-    });
-    y += 4;
-
-    // ── SECCIÓN 4: HISTORIAL DE AMENAZAS ─────────────────
-    doc.setFillColor(241, 245, 249);
-    doc.rect(10, y, W - 20, 7, "F");
-    doc.setTextColor(30, 58, 95);
-    doc.setFontSize(10);
-    doc.setFont("helvetica", "bold");
-    doc.text("4. HISTORIAL DE AMENAZAS DETECTADAS", 13, y + 5);
-    y += 12;
-
-    const hHeaders = ["Archivo", "Colaborador", "Fecha", "Amenaza", "Severidad", "Acción"];
-    const hColW    = [45, 25, 20, 45, 18, 20];
-    doc.setFillColor(30, 58, 95);
-    doc.rect(10, y, hColW.reduce((a,b)=>a+b,0)+6, 7, "F");
-    doc.setTextColor(255,255,255);
-    doc.setFontSize(7);
-    doc.setFont("helvetica", "bold");
-    cx = 13;
-    hHeaders.forEach((h,i) => { doc.text(h, cx, y+5); cx += hColW[i]; });
-    y += 7;
-
-    history.forEach((h, i) => {
-      doc.setFillColor(i%2===0 ? 248 : 255, i%2===0 ? 250 : 255, i%2===0 ? 252 : 255);
-      doc.rect(10, y, hColW.reduce((a,b)=>a+b,0)+6, 8, "F");
-      doc.setTextColor(51,65,85);
-      doc.setFont("helvetica","normal");
-      doc.setFontSize(7);
-      cx = 13;
-      [h.file, h.col, h.date, h.threat].forEach((val,vi) => {
-        const txt = doc.splitTextToSize(val, hColW[vi]-2)[0];
-        doc.text(txt, cx, y+5); cx += hColW[vi];
+    // Sección 3: Historial de amenazas
+    doc.setFillColor(241,245,249); doc.rect(10,y,W-20,7,"F");
+    doc.setTextColor(30,58,95); doc.setFontSize(10); doc.setFont("helvetica","bold");
+    doc.text("3. HISTORIAL DE AMENAZAS DETECTADAS",13,y+5); y+=12;
+    const hH=["Archivo","Propietario","Fecha","Estado","Región"];
+    const hW=[55,30,25,25,25];
+    doc.setFillColor(30,58,95); doc.rect(10,y,hW.reduce((a,b)=>a+b,0)+6,7,"F");
+    doc.setTextColor(255,255,255); doc.setFontSize(7); doc.setFont("helvetica","bold");
+    let cx2=13; hH.forEach((h,i2)=>{doc.text(h,cx2,y+5);cx2+=hW[i2];}); y+=7;
+    historial.forEach((h,i)=>{
+      if (y>270){doc.addPage();y=20;}
+      doc.setFillColor(i%2===0?248:255,i%2===0?250:255,i%2===0?252:255);
+      doc.rect(10,y,hW.reduce((a,b)=>a+b,0)+6,8,"F");
+      doc.setTextColor(51,65,85); doc.setFont("helvetica","normal"); doc.setFontSize(7);
+      cx2=13;
+      const tz=h.timezone||"America/Lima";
+      const {date}=formatLocalDateTime(h.lastModified,tz);
+      [h.name,h.owner||"—",date].forEach((v,vi)=>{
+        doc.text(doc.splitTextToSize(String(v),hW[vi]-2)[0],cx2,y+5);cx2+=hW[vi];
       });
-      // Severidad coloreada
-      doc.setFillColor(h.sev==="Alta"?220:245, h.sev==="Alta"?38:158, h.sev==="Alta"?38:11);
-      doc.roundedRect(cx, y+1.5, 14, 4.5, 1, 1, "F");
+      const isMal=h.status==="Malicious";
+      doc.setFillColor(isMal?220:245,isMal?38:158,isMal?38:11);
+      doc.roundedRect(cx2,y+1.5,22,4.5,1,1,"F");
       doc.setTextColor(255,255,255);
-      doc.text(h.sev, cx+7, y+5, {align:"center"});
-      cx += hColW[4];
-      doc.setTextColor(245,158,11);
-      doc.setFont("helvetica","bold");
-      doc.text(h.action, cx, y+5);
-      y += 8;
+      doc.text(isMal?"Malicioso":"Sospechoso",cx2+11,y+5,{align:"center"}); cx2+=hW[3];
+      const chip=REGION_CHIP[h.country||""];
+      doc.setTextColor(51,65,85); doc.text(chip?chip.label:(h.countryName||"—"),cx2,y+5);
+      y+=8;
     });
 
-    // ── FOOTER ────────────────────────────────────────────
-    const pageH = 297;
-    doc.setFillColor(30, 58, 95);
-    doc.rect(0, pageH - 14, W, 14, "F");
-    doc.setTextColor(255,255,255);
-    doc.setFontSize(7);
-    doc.setFont("helvetica","normal");
-    doc.text("/bluetab an IBM Company — DocuColab | Documento de uso interno", 10, pageH - 7);
-    doc.text(`Página 1 de 1  |  ${generated}`, W - 10, pageH - 7, { align:"right" });
-
-    doc.save(`reporte-azure-defender-${now.toISOString().split("T")[0]}.pdf`);
+    // Footer
+    const pH=297; doc.setFillColor(30,58,95); doc.rect(0,pH-14,W,14,"F");
+    doc.setTextColor(255,255,255); doc.setFontSize(7); doc.setFont("helvetica","normal");
+    doc.text("/bluetab an IBM Company — DocuColab | Documento de uso interno",10,pH-7);
+    doc.text(`Página 1  |  ${generated}`,W-10,pH-7,{align:"right"});
+    doc.save(`reporte-defender-${nowD.toISOString().split("T")[0]}.pdf`);
   };
 
   return (
@@ -921,15 +825,17 @@ function ReportesPage() {
       <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:20}}>
         <div className="page-header" style={{margin:0}}>
           <h1>Reportes — Azure Defender</h1>
-          <p>Análisis de amenazas en archivos subidos por colaboradores de EMPRESA_A</p>
+          <p>Análisis de amenazas en archivos subidos · {total} archivos en storage</p>
         </div>
         <button className="btn-pdf" onClick={exportPDF}>📄 Exportar PDF</button>
       </div>
+
+      {/* Stats reales */}
       <div className="stats-grid" style={{marginBottom:20}}>
         {stats.map((s,i)=>(
           <div className="stat-card" key={i}>
             <div className="stat-top">
-              <div className={`stat-icon ${["blue","red","orange","green"][i]}`}>{s.icon}</div>
+              <div className={`stat-icon ${s.color}`}>{s.icon}</div>
               <div className="stat-num">{s.num}</div>
             </div>
             <div className="stat-label">{s.label}</div>
@@ -937,57 +843,122 @@ function ReportesPage() {
           </div>
         ))}
       </div>
+
       <div className="two-cols" style={{marginBottom:16}}>
+        {/* Detecciones por mes */}
         <div className="card">
-          <div className="card-header"><h3>Detecciones por mes</h3><span style={{fontSize:11,color:"#94a3b8"}}>Últimos 6 meses</span></div>
+          <div className="card-header">
+            <h3>Detecciones por mes</h3>
+            <span style={{fontSize:11,color:"#94a3b8"}}>Últimos 6 meses</span>
+          </div>
           <div className="card-body">
-            {months.map((m,i)=>(
+            {monthLabels.map((m,i)=>(
               <div className="report-bar-row" key={i}>
                 <span className="report-bar-label">{m}</span>
                 <div className="report-bar-wrap">
-                  <div className="report-bar-fill" style={{width:maxBar>0?`${(bars[i]/maxBar)*100}%`:"0%",background:bars[i]>4?"#ef4444":bars[i]>1?"#f59e0b":"#22c55e"}}/>
+                  <div className="report-bar-fill" style={{
+                    width: `${(monthCounts[i]/maxBar)*100}%`,
+                    background: monthCounts[i]>4?"#ef4444":monthCounts[i]>1?"#f59e0b":"#22c55e"
+                  }}/>
                 </div>
-                <span className="report-bar-count">{bars[i]}</span>
+                <span className="report-bar-count">{monthCounts[i]}</span>
               </div>
             ))}
           </div>
         </div>
+
+        {/* Tipos de amenaza */}
         <div className="card">
-          <div className="card-header"><h3>Tipos de amenaza</h3></div>
+          <div className="card-header"><h3>Tipos de amenaza detectados</h3></div>
           <div className="card-body">
-            {threats.map((t,i)=>(
+            {threats.length === 0 ? (
+              <div style={{textAlign:"center",padding:"32px 0",color:"#94a3b8"}}>
+                <div style={{fontSize:32}}>✅</div>
+                <div style={{fontSize:13,marginTop:8}}>No se detectaron amenazas</div>
+              </div>
+            ) : threats.map((t,i)=>(
               <div className="threat-type-row" key={i}>
                 <div className="threat-dot" style={{background:t.color}}/>
                 <span className="threat-label">{t.label}</span>
-                <div className="threat-bar-wrap"><div className="threat-bar-fill" style={{width:`${t.pct}%`,background:t.color}}/></div>
-                <span className="threat-count">{t.count}</span>
+                <div className="threat-bar-wrap">
+                  <div className="threat-bar-fill" style={{width:`${t.pct}%`,background:t.color}}/>
+                </div>
+                <span className="threat-count">{t.count} archivo{t.count!==1?"s":""}</span>
               </div>
             ))}
+            {/* Archivos sin escanear */}
+            {sinEsc > 0 && (
+              <div className="threat-type-row" style={{marginTop:8,paddingTop:8,borderTop:"1px solid #f1f5f9"}}>
+                <div className="threat-dot" style={{background:"#94a3b8"}}/>
+                <span className="threat-label" style={{color:"#94a3b8"}}>Sin escanear</span>
+                <div className="threat-bar-wrap">
+                  <div className="threat-bar-fill" style={{width:`${total>0?Math.round(sinEsc/total*100):0}%`,background:"#cbd5e1"}}/>
+                </div>
+                <span className="threat-count" style={{color:"#94a3b8"}}>{sinEsc} archivo{sinEsc!==1?"s":""}</span>
+              </div>
+            )}
           </div>
         </div>
       </div>
+
+      {/* Historial de amenazas reales */}
       <div className="card">
-        <div className="card-header"><h3>Historial de amenazas</h3><span style={{fontSize:12,color:"#94a3b8"}}>{history.length} registros</span></div>
+        <div className="card-header">
+          <h3>Historial de amenazas detectadas</h3>
+          <span style={{fontSize:12,color:"#94a3b8"}}>{historial.length} registro{historial.length!==1?"s":""}</span>
+        </div>
+        {historial.length === 0 ? (
+          <div style={{padding:"48px 24px",textAlign:"center",color:"#94a3b8"}}>
+            <div style={{fontSize:40,marginBottom:12}}>✅</div>
+            <div style={{fontSize:15,fontWeight:600,color:"#475569"}}>No se detectaron amenazas</div>
+            <div style={{fontSize:13,marginTop:6}}>Todos los archivos escaneados están limpios</div>
+          </div>
+        ) : (
         <table>
-          <thead><tr><th>Archivo</th><th>Colaborador</th><th>Fecha</th><th>Amenaza</th><th>Categoría</th><th>Severidad</th><th>Acción</th></tr></thead>
+          <thead>
+            <tr>
+              <th>Archivo</th><th>Propietario</th><th>Región</th>
+              <th>Fecha</th><th>Hora</th><th>Tamaño</th><th>Estado</th>
+            </tr>
+          </thead>
           <tbody>
-            {history.map((h,i)=>(
-              <tr key={i}>
-                <td><div className="td-file" style={{color:"#ef4444"}}>📄 {h.file}</div></td>
-                <td>{h.col}</td><td>{h.date}</td>
-                <td style={{color:"#ef4444",fontSize:12}}>{h.threat}</td>
-                <td>{h.cat}</td>
-                <td><span style={{color:h.sev==="Alta"?"#ef4444":"#f59e0b",fontWeight:700}}>{h.sev}</span></td>
-                <td><span style={{color:"#f59e0b",fontWeight:600}}>{h.action}</span></td>
-              </tr>
-            ))}
+            {historial.map((h,i)=>{
+              const tz  = h.timezone || "America/Lima";
+              const {date,time,ampm,tzLabel} = formatLocalDateTime(h.lastModified, tz);
+              const chip = REGION_CHIP[h.country || ""];
+              return (
+                <tr key={i}>
+                  <td><div className="td-file" style={{color:"#ef4444"}}>📄 {h.name}</div></td>
+                  <td>{h.owner || "—"}</td>
+                  <td>
+                    {chip
+                      ? <span style={{display:"inline-flex",alignItems:"center",gap:4,background:`${chip.color}18`,
+                          color:chip.color,borderRadius:6,padding:"2px 8px",fontSize:12,fontWeight:600}}>
+                          {chip.flag} {chip.label}
+                        </span>
+                      : <span style={{color:"#94a3b8"}}>{h.countryName || "—"}</span>
+                    }
+                  </td>
+                  <td>{date}</td>
+                  <td style={{fontVariantNumeric:"tabular-nums",whiteSpace:"nowrap"}}>
+                    <span style={{fontSize:13,fontWeight:600,color:"#1e293b"}}>{time}</span>{" "}
+                    <span style={{fontSize:10,fontWeight:700,padding:"1px 5px",borderRadius:4,
+                      background:ampm==="AM"?"#dbeafe":"#fef3c7",
+                      color:ampm==="AM"?"#1d4ed8":"#92400e"}}>{ampm}</span>
+                    <span style={{fontSize:10,color:"#94a3b8",marginLeft:3}}>{tzLabel}</span>
+                  </td>
+                  <td>{h.size || "—"}</td>
+                  <td><StatusPill s={h.status}/></td>
+                </tr>
+              );
+            })}
           </tbody>
         </table>
+        )}
       </div>
     </div>
   );
 }
-
 // ── MAIN DASHBOARD ────────────────────────────────────────
 export default function DashboardPage() {
   const { instance, accounts } = useMsal();
@@ -1060,7 +1031,7 @@ export default function DashboardPage() {
           {page==="inicio"     && isAdmin && <InicioPage docs={docs} onUpload={()=>setPage("subir")} userName={user?.name||"Usuario"} allowedRegions={allowedRegions} />}
           {page==="subir"      && <SubirPage docs={docs} countries={countries} onUploaded={fetchDocs} userName={user?.name||"Usuario"} userEmail={user?.username||""} isAdmin={isAdmin} allowedRegions={allowedRegions} />}
           {page==="documentos" && isAdmin && <DocumentosPage docs={docs} apiLoaded={apiLoaded} apiError={apiError} allowedRegions={allowedRegions} />}
-          {page==="reportes"   && isAdmin && <ReportesPage />}
+          {page==="reportes"   && isAdmin && <ReportesPage docs={docs} />}
         </div>
       </div>
     </div>

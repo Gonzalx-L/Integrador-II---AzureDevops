@@ -61,6 +61,12 @@ jobs:
         run: npm run build
         working-directory: backend
 
+      - name: Empaquetar solo lo necesario para el deploy
+        run: |
+          cd backend
+          zip -r ../backend-deploy.zip dist/ host.json package.json package-lock.json
+        shell: bash
+
       - name: Login a Azure
         uses: azure/login@v2
         with:
@@ -70,5 +76,4 @@ jobs:
         uses: Azure/functions-action@v1
         with:
           app-name: func-docucolab-dev
-          package: backend
-          respect-funcignore: true
+          package: backend-deploy.zip

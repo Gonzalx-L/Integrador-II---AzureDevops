@@ -2,113 +2,129 @@ import { app, InvocationContext } from "@azure/functions";
 import { sendQueueMessage } from "../../utils/queueHelper";
 
 /**
+ * Estructura del evento que Azure Defender for Storage publica en Event Grid
+ * cuando termina el escaneo de malware de un blob.
+ *
+ * Referencia:
+ * https://learn.microsoft.com/azure/defender-for-cloud/defender-for-storage-introduction
+ *
+ * Evento tipo: Microsoft.Security.MalwareScanningResult
+ */
+interface DefenderEventGridEvent {
+  id:          string;
+  eventType:   string;   // "Microsoft.Security.MalwareScanningResult"
+  subject:     string;   // ruta del blob
+  eventTime:   string;
+  data: {
+    // Resultado del escaneo — valores posibles:
+    //   "No threats found"  → archivo limpio
+    //   "Malicious"         → amenaza confirmada
+    //   "Suspicious"        → comportamiento sospechoso
+    scanResultType:    string;
+    blobUri:           string;   // URL completa del blob
+    storageAccountName:string;
+    containerName:     string;
+    blobName:          string;   // ruta relativa: {storagePath}/{fecha}/{uuid}_archivo.zip
+    correlationId:     string;
+    scanFinishedTimeUtc: string;
+    // Solo presente si scanResultType === "Malicious"
+    threats?: Array<{
+      threatName: string;
+      severity:   string;   // "High" | "Medium" | "Low"
+      category:   string;   // "Trojan" | "Ransomware" | etc.
+    }>;
+  };
+}
+
+/**
  * OnDefenderEventGrid — Event Grid Trigger
  *
- * Recibe el resultado real de Azure Defender for Storage (Malware Scanning).
- * Defender publica un evento "Microsoft.Security.MalwareScanningResult"
- * en el Event Grid Topic cada vez que termina de escanear un blob.
+ * Recibe el resultado del escaneo de Azure Defender for Storage vía Event Grid.
+ * Según el resultado encola el mensaje en la cola correspondiente:
+ *   - "No threats found" → queue-zip-limpios
+ *   - "Malicious"        → queue-zip-error
+ *   - "Suspicious"       → queue-zip-error (tratado igual que malicioso)
  *
- * El evento llega con este shape:
- * {
- *   eventType: "Microsoft.Security.MalwareScanningResult",
- *   data: {
- *     verdict:              "No threats found" | "Malicious" | "Suspicious",
- *     blobUri:              "https://sttransferenciaarchivos.blob.core.windows.net/...",
- *     scanFinishedTimeUtc:  "2026-07-16T10:00:00Z",
- *     threatName:           "" | "Trojan:Win32/..."
- *   }
- * }
+ * Para activar en producción:
+ *   Portal Azure → Event Grid Topic (evgt-transferenciaarch-dev)
+ *   → Event Subscriptions → sub-defender-malware-result
+ *   → Filter: Microsoft.Security.MalwareScanningResult
+ *   → Endpoint: esta función
  *
- * Este handler:
- *   1. Extrae blobUri y verdict del evento
- *   2. Reconstruye el mensaje con la misma forma que usaba el mock
- *   3. Encola en la cola correspondiente:
- *      - "No threats found" → queue-zip-limpios
- *      - "Malicious"        → queue-zip-error
- *      - "Suspicious"       → queue-zip-error  (tratamos como error por seguridad)
- *   4. El resto del pipeline (OnCleanZipFromQueue, OnErrorZipFromQueue) sigue igual
+ * Para desactivar después de la demo:
+ *   Portal Azure → sttransferenciaarchivos → Microsoft Defender for Cloud → Off
  */
 export async function onDefenderEventGrid(
   event: unknown,
   context: InvocationContext
 ): Promise<void> {
-  context.log("OnDefenderEventGrid — evento recibido de Azure Defender");
-  context.log(JSON.stringify(event));
+  context.log("OnDefenderEventGrid: evento recibido de Azure Defender");
 
-  const ev = event as any;
+  try {
+    // Event Grid entrega un array con un objeto por evento
+    const payload = Array.isArray(event) ? event[0] : event;
+    const ev = payload as DefenderEventGridEvent;
 
-  // El evento puede llegar como array (Event Grid batch) o como objeto único
-  const data = Array.isArray(ev) ? ev[0]?.data : ev?.data;
+    context.log(`Defender scan result: ${ev.data?.scanResultType} — blob: ${ev.data?.blobName}`);
 
-  if (!data) {
-    context.warn("Evento sin data — ignorado");
-    return;
-  }
+    const blobName     = ev.data?.blobName     || "";
+    const blobUri      = ev.data?.blobUri       || "";
+    const scanResult   = ev.data?.scanResultType || "Unknown";
+    const scannedAt    = ev.data?.scanFinishedTimeUtc || new Date().toISOString();
+    const threats      = ev.data?.threats || [];
 
-  const verdict:   string = data.verdict             || "Malicious";
-  const blobUri:   string = data.blobUri             || "";
-  const scannedAt: string = data.scanFinishedTimeUtc || new Date().toISOString();
-  const threatName:string = data.threatName          || "";
+    // Extraer el nombre limpio del archivo (sin UUID)
+    const rawFileName  = blobName.split("/").pop() ?? blobName;
+    const cleanFileName = rawFileName.replace(
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}_/i,
+      ""
+    );
 
-  context.log(`Verdict: ${verdict} | Blob: ${blobUri}`);
+    // Extraer countryCode de la ruta del blob
+    // Formato esperado: BLUETAB_PERU/DD-MM-YYYY/uuid_archivo.zip
+    const pathParts  = blobName.split("/");
+    const countryCode = pathParts[0]?.replace("BLUETAB_", "") || "UNKNOWN";
 
-  if (!blobUri) {
-    context.warn("blobUri vacío — no se puede procesar");
-    return;
-  }
+    const queuePayload = {
+      fileName:    cleanFileName,
+      blobPath:    blobName,
+      blobUri,
+      countryCode,
+      uploadedAt:  ev.eventTime || new Date().toISOString(),
+      scanResult,
+      scanDetails: threats.length > 0
+        ? threats.map(t => `${t.threatName} (${t.category} - ${t.severity})`).join(", ")
+        : scanResult === "No threats found"
+          ? "Escaneo completado sin amenazas."
+          : `Resultado: ${scanResult}`,
+      scannedAt,
+      isPasswordProtected: false
+    };
 
-  // Extraer countryCode y fileName desde la URL del blob
-  // Formato esperado: https://{account}.blob.core.windows.net/{container}/{storagePath}/{dateFolder}/{uuid}_{nombre}.zip
-  // Ejemplo: https://sttransferenciaarchivos.blob.core.windows.net/transferencia-archivos/BLUETAB_PERU/16-07-2026/abc_doc.zip
-  const urlParts  = blobUri.replace("https://", "").split("/");
-  // urlParts[0] = account.blob.core.windows.net
-  // urlParts[1] = container
-  // urlParts[2] = storagePath (BLUETAB_PERU, BLUETAB_ESPANA, etc.)
-  // urlParts[3] = dateFolder (DD-MM-YYYY)
-  // urlParts[4] = fileName
-  const container   = urlParts[1] || "";
-  const storagePath = urlParts[2] || "";
-  const dateFolder  = urlParts[3] || "";
-  const fileName    = urlParts.slice(4).join("/"); // por si el nombre tiene /
-  const blobPath    = `${storagePath}/${dateFolder}/${fileName}`;
-
-  // Inferir countryCode desde storagePath: BLUETAB_PERU → PERU
-  const countryCode = storagePath.replace("BLUETAB_", "");
-
-  const queuePayload = {
-    fileName,
-    blobPath,
-    countryCode,
-    storagePath,
-    uploadedAt:          new Date().toISOString(), // no tenemos el original, aproximamos
-    fileSize:            0,                        // no disponible en el evento
-    scanResult:          verdict,
-    scanDetails:         threatName
-                          ? `Amenaza detectada por Azure Defender: ${threatName}`
-                          : `Azure Defender: ${verdict}`,
-    scannedAt,
-    isPasswordProtected: false,
-    source:              "AzureDefenderReal"       // para distinguir del mock en logs
-  };
-
-  switch (verdict) {
-    case "No threats found":
+    if (scanResult === "No threats found") {
+      // Archivo limpio → procesar normalmente
       await sendQueueMessage(
         process.env["QUEUE_LIMPIOS"] || "queue-zip-limpios",
         queuePayload
       );
-      context.log(`✅ Archivo limpio encolado: ${fileName}`);
-      break;
+      context.log(`✅ Archivo limpio encolado en queue-zip-limpios: ${cleanFileName}`);
 
-    case "Malicious":
-    case "Suspicious":
-    default:
+    } else if (scanResult === "Malicious" || scanResult === "Suspicious") {
+      // Amenaza detectada → enviar a error
       await sendQueueMessage(
         process.env["QUEUE_ERROR"] || "queue-zip-error",
-        { ...queuePayload, scanResult: "ERROR" }
+        queuePayload
       );
-      context.log(`🚫 Archivo con amenaza encolado en error: ${fileName} — ${verdict}`);
-      break;
+      context.warn(`⚠️ Amenaza detectada (${scanResult}), encolado en queue-zip-error: ${cleanFileName}`);
+
+    } else {
+      // Resultado desconocido o "Scanning" — solo loguear
+      context.log(`Resultado no manejado: ${scanResult} para ${cleanFileName}`);
+    }
+
+  } catch (error: any) {
+    context.error(`Error procesando evento de Defender: ${error.message}`);
+    // No relanzamos — si falla el evento de EG no tiene reintento automático útil
   }
 }
 

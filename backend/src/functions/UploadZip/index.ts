@@ -117,6 +117,92 @@ export async function uploadZip(
 
     context.log(`Archivo subido: ${blobPath}`);
 
+    // ── SIMULACIÓN DE AZURE DEFENDER ──────────────────────────────────────
+    // DEFENDER_MOCK=true → simula el escaneo escribiendo tags en el blob.
+    // En producción (con Defender real activo) esto no se ejecuta.
+    //
+    // Flujo simulado:
+    //   1. El blob queda SIN tag → frontend muestra "Unscanned" (Sin escanear)
+    //   2. Espera DEFENDER_MOCK_DELAY segundos (default: 10)
+    //   3. Escribe el tag final:
+    //      - "Malicious"       si el nombre contiene: PruebaAntony, ReporteGonzalo, Ventas123
+    //      - "No threats found" para cualquier otro archivo
+    if (process.env["DEFENDER_MOCK"] === "true") {
+      const delaySeconds = parseInt(process.env["DEFENDER_MOCK_DELAY"] || "10");
+
+      // Nombres que simulan ser maliciosos (case-insensitive)
+      const MALICIOUS_NAMES = ["PruebaAntony", "ReporteGonzalo", "Ventas123"];
+
+      const { BlobServiceClient } = await import("@azure/storage-blob");
+      const blobServiceClient = BlobServiceClient.fromConnectionString(
+        process.env["STORAGE_TRANSFERENCIA_CONNECTION"]!
+      );
+      const blobClient = blobServiceClient
+        .getContainerClient(containerName)
+        .getBlobClient(blobPath);
+
+      // Paso 1: el blob queda sin tag → se muestra como "Unscanned" en el frontend
+      // No escribimos nada — ese es el comportamiento por defecto de Defender
+
+      context.log(`[MOCK] Blob subido sin tag (Unscanned): ${blobPath}`);
+
+      // Paso 2: después del delay escribir el resultado final y mover el blob
+      setImmediate(async () => {
+        try {
+          await new Promise(resolve => setTimeout(resolve, delaySeconds * 1000));
+
+          const nameToCheck = file.name.toLowerCase().replace(/\.zip$/i, "");
+          const isMalicious = MALICIOUS_NAMES.some(n =>
+            nameToCheck.includes(n.toLowerCase())
+          );
+
+          const finalResult = isMalicious ? "Malicious" : "No threats found";
+
+          // Escribir tag de resultado
+          await blobClient.setTags({ "Malware Scanning Result": finalResult });
+          context.log(`[MOCK] Tag '${finalResult}' escrito en: ${blobPath}`);
+
+          // ── Mover blob a la carpeta correspondiente ────────────────────
+          // "No threats found" → MENSUALES/{storagePath}/ (archivos limpios)
+          // "Malicious"        → MENSUALES/{storagePath}/ERROR/ (amenazas)
+          const { BlobServiceClient: BSC } = await import("@azure/storage-blob");
+          const svc       = BSC.fromConnectionString(process.env["STORAGE_TRANSFERENCIA_CONNECTION"]!);
+          const container = svc.getContainerClient(containerName);
+
+          // Descargar el blob original
+          const downloadResponse = await container.getBlobClient(blobPath).download(0);
+          const chunks: Buffer[] = [];
+          for await (const chunk of downloadResponse.readableStreamBody as AsyncIterable<Buffer>) {
+            chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+          }
+          const fileData = Buffer.concat(chunks);
+
+          // Determinar ruta destino
+          const destPath = isMalicious
+            ? `MENSUALES/${country.storagePath}/ERROR/${fileName}`
+            : `MENSUALES/${country.storagePath}/${fileName}`;
+
+          // Subir a destino con el mismo metadata + tag de resultado
+          const destBlob = container.getBlockBlobClient(destPath);
+          await destBlob.upload(fileData, fileData.length, {
+            metadata: {
+              uploader:    uploader,
+              uploadedat:  uploadedAt,
+              countrycode: countryCode,
+              timezone:    country.timezone,
+            }
+          });
+          await destBlob.setTags({ "Malware Scanning Result": finalResult });
+
+          context.log(`[MOCK] Blob movido a: ${destPath}`);
+
+        } catch (e: any) {
+          context.error(`[MOCK] Error en post-escaneo: ${e.message}`);
+        }
+      });
+    }
+    // ── FIN SIMULACIÓN ────────────────────────────────────────────────────
+
     // Encolar para escaneo
     const queueMessage = {
       fileId,

@@ -14,3 +14,4 @@ import "./functions/UploadZip/index";
 import "./functions/GetDocuments/index";
 import "./functions/GetPipelineStatus/index";
 import "./functions/DownloadZip/index";
+import "./functions/OnDefenderEventGrid/index";
